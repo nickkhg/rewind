@@ -4,11 +4,46 @@ A real-time retrospective tool for teams. Run column-based retro sessions where 
 
 Boards are ephemeral: no accounts, no persistence. The facilitator creates a board, shares a link, and the team adds cards, votes, and reveals together.
 
+<p align="center">
+  <img src="docs/screenshots/board.png" alt="Board view — light mode" width="720" />
+</p>
+
+<details>
+<summary>Dark mode</summary>
+<p align="center">
+  <img src="docs/screenshots/board-dark.png" alt="Board view — dark mode" width="720" />
+</p>
+</details>
+
+## Features
+
+- **Real-time collaboration** — cards, votes, and blur state sync instantly via WebSocket
+- **Blur / Reveal** — facilitator controls card visibility; authors always see their own cards
+- **Voting** — toggle votes on any card, sort by most votes or newest
+- **Board templates** — Classic, Start/Stop/Continue, 4Ls, Mad Sad Glad, Sailboat, DAKI — managed in the database
+- **Custom columns** — or define your own column layout
+- **Anonymous boards** — optional name-free mode (enabled by default)
+- **Share link** — one-click copy to clipboard
+- **Dark mode** — light and dark themes with system preference detection
+- **Desktop app** — native macOS window via Tauri v2 with `rewind://` deep links
+- **Admin CMS** — view all boards and manage templates (see below)
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Home page — create a board" width="560" />
+</p>
+
+<details>
+<summary>Home page — dark mode</summary>
+<p align="center">
+  <img src="docs/screenshots/home-dark.png" alt="Home page — dark mode" width="560" />
+</p>
+</details>
+
 ## Architecture
 
 ```
 frontend/     React + Vite + Tailwind v4 + Zustand
-backend/      Rust Axum server (REST + WebSocket)
+backend/      Rust Axum server (REST + WebSocket) + PostgreSQL
 src-tauri/    Tauri v2 desktop wrapper
 ```
 
@@ -58,19 +93,9 @@ cd ../backend && cargo build --release
 cargo tauri build  # for macOS .app bundle
 ```
 
-## Features
-
-- **Real-time collaboration** — cards, votes, and blur state sync instantly via WebSocket
-- **Blur/Reveal** — facilitator controls card visibility; authors always see their own cards
-- **Voting** — toggle votes on any card, sort by most votes or newest
-- **Editable columns** — customize column names when creating a board (defaults: Went Well, To Improve, Action Items)
-- **Share link** — one-click copy to clipboard
-- **Desktop app** — native macOS window via Tauri v2 with `rewind://` deep links
-- **Admin interface** — view all boards, stats, and delete boards (see below)
-
 ## Admin Interface
 
-An optional admin dashboard at `/admin` lets a privileged user view all boards in the database and delete them. Access is gated by an Argon2-hashed secret token.
+An optional admin dashboard at `/admin` lets a privileged user view all boards, manage templates, and delete boards. Access is gated by an Argon2-hashed secret token.
 
 ### Setup
 
@@ -119,7 +144,8 @@ Alternatively, use an `env_file:` — `.env` files don't need escaping.
 2. Enter the plaintext admin token to log in (stored in `sessionStorage`)
 3. The dashboard shows global stats (boards, tickets, votes, online users) and a board table
 4. Click a board row to see its detail panel (columns, facilitator token, blur state)
-5. Delete boards from the table or detail panel (with confirmation dialog)
+5. Switch to the **Templates** tab to create, edit, or delete board templates
+6. Delete boards from the table or detail panel (with confirmation dialog)
 
 ### API Endpoints
 
@@ -132,6 +158,10 @@ All admin endpoints require `Authorization: Bearer <plaintext-token>`.
 | `GET` | `/api/admin/boards` | List all boards with stats |
 | `GET` | `/api/admin/boards/:id` | Board detail (columns, facilitator token) |
 | `DELETE` | `/api/admin/boards/:id` | Delete board (cascades tickets/votes) |
+| `GET` | `/api/admin/templates` | List all templates |
+| `POST` | `/api/admin/templates` | Create a template |
+| `PUT` | `/api/admin/templates/:id` | Update a template |
+| `DELETE` | `/api/admin/templates/:id` | Delete a template |
 
 ## Design
 
