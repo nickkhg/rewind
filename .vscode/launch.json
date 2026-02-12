@@ -14,7 +14,8 @@
       },
       "env": {
         "RUST_LOG": "debug",
-        "DATABASE_URL": "postgres://rewind:rewind@localhost:5432/rewind"
+        "DATABASE_URL": "postgres://rewind:rewind@localhost:5432/rewind",
+        "ADMIN_TOKEN_HASH": "$argon2id$v=19$m=19456,t=2,p=1$dyWO0SwJGC2XR4sRgl5QoQ$WAnRV5M2jPZA92UZ85JCQxWavtWsltIdcRQ0YLI7Yns"
       },
       "cwd": "${workspaceFolder}/backend"
     },

@@ -48,6 +48,36 @@ export type ServerMessage =
 
 export type SortMode = "newest" | "most-votes";
 
+// --- Admin types ---
+
+export interface GlobalStats {
+  board_count: number;
+  ticket_count: number;
+  vote_count: number;
+  online_participants: number;
+}
+
+export interface AdminBoardSummary {
+  id: string;
+  title: string;
+  is_blurred: boolean;
+  created_at: string;
+  column_count: number;
+  ticket_count: number;
+  vote_count: number;
+  online_participants: number;
+}
+
+export interface AdminBoardDetail {
+  id: string;
+  title: string;
+  is_blurred: boolean;
+  created_at: string;
+  facilitator_token: string;
+  columns: { id: string; name: string; ticket_count: number }[];
+  online_participants: number;
+}
+
 export const COLUMN_COLORS = [
   "#d4edbc", // green
   "#fcd5ce", // rose

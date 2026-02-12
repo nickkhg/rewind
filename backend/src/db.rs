@@ -293,6 +293,48 @@ pub async fn column_belongs_to_board(
     Ok(row.count > 0)
 }
 
+// --- Admin ---
+
+pub async fn admin_global_stats(pool: &PgPool) -> Result<AdminStatsRow, sqlx::Error> {
+    sqlx::query_as::<_, AdminStatsRow>(
+        r#"
+        SELECT
+            (SELECT COUNT(*) FROM boards) AS board_count,
+            (SELECT COUNT(*) FROM tickets) AS ticket_count,
+            (SELECT COUNT(*) FROM votes) AS vote_count
+        "#,
+    )
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn admin_list_boards(pool: &PgPool) -> Result<Vec<AdminBoardRow>, sqlx::Error> {
+    sqlx::query_as::<_, AdminBoardRow>(
+        r#"
+        SELECT
+            b.id,
+            b.title,
+            b.is_blurred,
+            b.created_at,
+            (SELECT COUNT(*) FROM columns c WHERE c.board_id = b.id) AS column_count,
+            (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id WHERE c.board_id = b.id) AS ticket_count,
+            (SELECT COUNT(*) FROM votes v JOIN tickets t ON v.ticket_id = t.id JOIN columns c ON t.column_id = c.id WHERE c.board_id = b.id) AS vote_count
+        FROM boards b
+        ORDER BY b.created_at DESC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn admin_delete_board(pool: &PgPool, board_id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM boards WHERE id = $1")
+        .bind(board_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // --- Row types for query_as ---
 
 #[derive(sqlx::FromRow)]
@@ -346,4 +388,22 @@ struct BlurRow {
 #[derive(sqlx::FromRow)]
 struct CountRow {
     count: i64,
+}
+
+#[derive(sqlx::FromRow, Debug)]
+pub struct AdminStatsRow {
+    pub board_count: i64,
+    pub ticket_count: i64,
+    pub vote_count: i64,
+}
+
+#[derive(sqlx::FromRow, Debug)]
+pub struct AdminBoardRow {
+    pub id: String,
+    pub title: String,
+    pub is_blurred: bool,
+    pub created_at: DateTime<Utc>,
+    pub column_count: i64,
+    pub ticket_count: i64,
+    pub vote_count: i64,
 }

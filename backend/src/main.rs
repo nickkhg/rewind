@@ -37,13 +37,25 @@ async fn main() {
 
     tracing::info!("database connected and migrations applied");
 
-    let state = AppState::new(db);
+    let admin_token_hash = std::env::var("ADMIN_TOKEN_HASH").ok();
+    if admin_token_hash.is_some() {
+        tracing::info!("admin interface enabled");
+    }
+
+    let state = AppState::new(db, admin_token_hash);
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_default();
 
     let mut app = Router::new()
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))
-        .route("/ws/boards/{id}", get(routes::ws::ws_handler));
+        .route("/ws/boards/{id}", get(routes::ws::ws_handler))
+        .route("/api/admin/verify", post(routes::admin::verify_token))
+        .route("/api/admin/stats", get(routes::admin::global_stats))
+        .route("/api/admin/boards", get(routes::admin::list_boards))
+        .route(
+            "/api/admin/boards/{id}",
+            get(routes::admin::get_board_detail).delete(routes::admin::delete_board),
+        );
 
     // Serve frontend static files if STATIC_DIR is set (production)
     if !static_dir.is_empty() {

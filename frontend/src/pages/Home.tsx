@@ -138,6 +138,15 @@ export default function Home() {
             {loading ? "Creating..." : "Start Retro"}
           </button>
         </form>
+
+        <p className="text-center mt-4">
+          <a
+            href="/admin"
+            className="text-xs text-muted hover:text-ink transition-colors"
+          >
+            Admin
+          </a>
+        </p>
       </div>
     </div>
   );

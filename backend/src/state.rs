@@ -12,14 +12,16 @@ pub struct AppState {
     pub db: PgPool,
     pub participants: Arc<RwLock<HashMap<String, Vec<Participant>>>>,
     pub channels: Arc<RwLock<HashMap<String, BoardChannel>>>,
+    pub admin_token_hash: Option<String>,
 }
 
 impl AppState {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: PgPool, admin_token_hash: Option<String>) -> Self {
         Self {
             db,
             participants: Arc::new(RwLock::new(HashMap::new())),
             channels: Arc::new(RwLock::new(HashMap::new())),
+            admin_token_hash,
         }
     }
 
