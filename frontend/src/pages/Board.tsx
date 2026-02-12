@@ -36,7 +36,7 @@ export default function Board() {
   if (!participantName) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-border p-8">
+        <div className="w-full max-w-sm bg-surface rounded-2xl shadow-sm border border-border p-8">
           <h2 className="font-display text-xl font-semibold mb-4">Join the retro</h2>
           <form
             onSubmit={(e) => {

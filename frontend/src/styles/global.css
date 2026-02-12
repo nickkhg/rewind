@@ -2,6 +2,7 @@
 
 @theme {
   --color-canvas: #faf8f5;
+  --color-surface: #ffffff;
   --color-ink: #2d2a26;
   --color-accent: #e07a5f;
   --color-accent-hover: #c96a50;
@@ -25,6 +26,16 @@
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
     background-repeat: repeat;
     background-size: 256px 256px;
+  }
+
+  [data-theme="dark"] {
+    --color-canvas: #1a1816;
+    --color-surface: #252220;
+    --color-ink: #e8e4df;
+    --color-accent: #e07a5f;
+    --color-accent-hover: #e89680;
+    --color-muted: #7a736d;
+    --color-border: #3a3532;
   }
 }
 

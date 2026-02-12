@@ -60,7 +60,7 @@ export default function Home() {
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white rounded-2xl shadow-sm border border-border p-8 space-y-6"
+          className="bg-surface rounded-2xl shadow-sm border border-border p-8 space-y-6"
         >
           <div>
             <label htmlFor="name" className="block text-sm font-medium mb-1.5">

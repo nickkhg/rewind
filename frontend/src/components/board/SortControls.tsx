@@ -8,7 +8,7 @@ export function SortControls() {
       <button
         onClick={() => setSortMode("newest")}
         className={`px-2 py-1 rounded transition-colors ${
-          sortMode === "newest" ? "bg-ink text-white" : "text-muted hover:text-ink"
+          sortMode === "newest" ? "bg-ink text-canvas" : "text-muted hover:text-ink"
         }`}
       >
         Newest
@@ -16,7 +16,7 @@ export function SortControls() {
       <button
         onClick={() => setSortMode("most-votes")}
         className={`px-2 py-1 rounded transition-colors ${
-          sortMode === "most-votes" ? "bg-ink text-white" : "text-muted hover:text-ink"
+          sortMode === "most-votes" ? "bg-ink text-canvas" : "text-muted hover:text-ink"
         }`}
       >
         Top Voted

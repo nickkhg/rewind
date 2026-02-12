@@ -22,7 +22,7 @@ export function BoardHeader({ send }: BoardHeaderProps) {
   }
 
   return (
-    <header className="border-b border-border bg-white/80 backdrop-blur-sm sticky top-0 z-10">
+    <header className="border-b border-border bg-surface/80 backdrop-blur-sm sticky top-0 z-10">
       <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
           <Logo className="text-xl text-accent shrink-0" />

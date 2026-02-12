@@ -42,7 +42,7 @@ export function TicketCard({ ticket, color, send }: TicketProps) {
 
   return (
     <div
-      className="animate-card-enter bg-white rounded-lg shadow-sm border border-border/60 p-3 relative group"
+      className="animate-card-enter bg-surface rounded-lg shadow-sm border border-border/60 p-3 relative group"
       style={{
         borderLeftWidth: "4px",
         borderLeftColor: color,
@@ -63,7 +63,7 @@ export function TicketCard({ ticket, color, send }: TicketProps) {
               if (e.key === "Escape") setEditing(false);
             }}
             rows={2}
-            className="w-full rounded border border-border px-2 py-1 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="w-full rounded border border-border px-2 py-1 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 bg-surface"
             autoFocus
           />
           <div className="flex gap-1 mt-1">
