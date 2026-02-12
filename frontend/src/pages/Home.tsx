@@ -159,15 +159,26 @@ export default function Home() {
             )}
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isAnonymous}
-              onChange={(e) => setIsAnonymous(e.target.checked)}
-              className="rounded border-border text-accent focus:ring-accent/40"
-            />
-            <span className="text-sm font-medium">Anonymous board</span>
-            <span className="text-xs text-muted">— no names shown</span>
+          <label className="flex items-center gap-3 cursor-pointer group">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isAnonymous}
+              onClick={() => setIsAnonymous((v) => !v)}
+              className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas ${
+                isAnonymous ? "bg-accent" : "bg-border"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
+                  isAnonymous ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+            <div className="select-none">
+              <span className="text-sm font-medium">Anonymous board</span>
+              <span className="text-xs text-muted ml-1.5">— no names shown</span>
+            </div>
           </label>
 
           {error && (
