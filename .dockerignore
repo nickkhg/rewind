@@ -1,0 +1,11 @@
+target/
+node_modules/
+dist/
+.git/
+.agents/
+.claude/
+.playwright-mcp/
+demo-videos/
+*.mp4
+*.webm
+*.png

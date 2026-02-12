@@ -8,7 +8,7 @@ axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs"] }
 nanoid = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
