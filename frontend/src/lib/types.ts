@@ -57,6 +57,13 @@ export interface MyBoardSummary {
   is_anonymous: boolean;
 }
 
+export interface Template {
+  id: string;
+  name: string;
+  description: string;
+  columns: string[];
+}
+
 export type SortMode = "newest" | "most-votes";
 
 // --- Admin types ---

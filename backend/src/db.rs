@@ -236,6 +236,76 @@ pub async fn get_boards_by_facilitator_id(
         .collect())
 }
 
+// --- Templates ---
+
+pub async fn list_templates(pool: &PgPool) -> Result<Vec<crate::models::Template>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, TemplateRow>(
+        "SELECT id, name, description, columns FROM templates ORDER BY position",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| crate::models::Template {
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            columns: r.columns,
+        })
+        .collect())
+}
+
+pub async fn create_template(
+    pool: &PgPool,
+    id: &str,
+    name: &str,
+    description: &str,
+    columns: &[String],
+    position: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO templates (id, name, description, columns, position) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(id)
+    .bind(name)
+    .bind(description)
+    .bind(columns)
+    .bind(position)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn update_template(
+    pool: &PgPool,
+    id: &str,
+    name: &str,
+    description: &str,
+    columns: &[String],
+    position: i32,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE templates SET name = $1, description = $2, columns = $3, position = $4 WHERE id = $5",
+    )
+    .bind(name)
+    .bind(description)
+    .bind(columns)
+    .bind(position)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn delete_template(pool: &PgPool, id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM templates WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // --- Tickets ---
 
 pub async fn add_ticket(
@@ -474,6 +544,14 @@ struct MyBoardRow {
     is_anonymous: bool,
     column_count: i64,
     ticket_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct TemplateRow {
+    id: String,
+    name: String,
+    description: String,
+    columns: Vec<String>,
 }
 
 #[derive(sqlx::FromRow)]

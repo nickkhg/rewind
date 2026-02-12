@@ -5,7 +5,7 @@ mod protocol;
 mod routes;
 mod state;
 
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use state::AppState;
@@ -46,6 +46,7 @@ async fn main() {
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_default();
 
     let mut app = Router::new()
+        .route("/api/templates", get(routes::boards::list_templates))
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))
         .route("/api/my-boards", get(routes::boards::my_boards))
@@ -56,6 +57,14 @@ async fn main() {
         .route(
             "/api/admin/boards/{id}",
             get(routes::admin::get_board_detail).delete(routes::admin::delete_board),
+        )
+        .route(
+            "/api/admin/templates",
+            get(routes::admin::list_templates).post(routes::admin::create_template),
+        )
+        .route(
+            "/api/admin/templates/{id}",
+            put(routes::admin::update_template).delete(routes::admin::delete_template),
         );
 
     // Serve frontend static files if STATIC_DIR is set (production)

@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
-import { createBoard, fetchMyBoards } from "../lib/api";
-import type { MyBoardSummary } from "../lib/types";
+import { createBoard, fetchMyBoards, fetchTemplates } from "../lib/api";
+import type { MyBoardSummary, Template } from "../lib/types";
+import { COLUMN_COLORS } from "../lib/types";
 
 const DEFAULT_COLUMNS = ["Went Well", "To Improve", "Action Items"];
 
@@ -25,15 +26,33 @@ export default function Home() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>("classic");
   const [name, setName] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [myBoards, setMyBoards] = useState<MyBoardSummary[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+
+  function selectTemplate(template: Template | null) {
+    if (template) {
+      setSelectedTemplate(template.id);
+      setColumns([...template.columns]);
+    } else {
+      setSelectedTemplate(null);
+    }
+  }
 
   useEffect(() => {
     fetchMyBoards()
       .then(setMyBoards)
+      .catch(() => {});
+    fetchTemplates()
+      .then((tpls) => {
+        setTemplates(tpls);
+        const classic = tpls.find((t) => t.id === "classic");
+        if (classic) setColumns([...classic.columns]);
+      })
       .catch(() => {});
   }, []);
 
@@ -124,38 +143,105 @@ export default function Home() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1.5">Columns</label>
-            <div className="space-y-2">
-              {columns.map((col, i) => (
-                <div key={i} className="flex gap-2">
-                  <input
-                    type="text"
-                    value={col}
-                    onChange={(e) => updateColumn(i, e.target.value)}
-                    placeholder={`Column ${i + 1}`}
-                    className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
-                  />
-                  {columns.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeColumn(i)}
-                      className="px-2 text-muted hover:text-ink transition-colors"
-                      aria-label="Remove column"
-                    >
-                      &times;
-                    </button>
+            <label className="block text-sm font-medium mb-2">Template</label>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectTemplate(t)}
+                  className={`group relative text-left rounded-xl border px-3.5 py-2.5 transition-all duration-200 ${
+                    selectedTemplate === t.id
+                      ? "border-accent bg-accent/[0.06] ring-1 ring-accent/30"
+                      : "border-border bg-canvas hover:border-accent/30 hover:bg-accent/[0.02]"
+                  }`}
+                >
+                  <span
+                    className={`block text-sm font-medium leading-tight transition-colors ${
+                      selectedTemplate === t.id ? "text-accent" : "text-ink"
+                    }`}
+                  >
+                    {t.name}
+                  </span>
+                  <span className="block text-[11px] text-muted leading-snug mt-0.5">
+                    {t.description}
+                  </span>
+                  {selectedTemplate === t.id && (
+                    <div className="flex gap-1 mt-2">
+                      {t.columns.map((col, i) => (
+                        <span
+                          key={i}
+                          className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-md"
+                          style={{
+                            backgroundColor: COLUMN_COLORS[i % COLUMN_COLORS.length],
+                            color: "#2d2a26",
+                          }}
+                        >
+                          {col}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                </div>
+                </button>
               ))}
-            </div>
-            {columns.length < 5 && (
               <button
                 type="button"
-                onClick={addColumn}
-                className="mt-2 text-sm text-accent hover:text-accent-hover transition-colors"
+                onClick={() => selectTemplate(null)}
+                className={`group relative text-left rounded-xl border px-3.5 py-2.5 transition-all duration-200 ${
+                  selectedTemplate === null
+                    ? "border-accent bg-accent/[0.06] ring-1 ring-accent/30"
+                    : "border-border bg-canvas hover:border-accent/30 hover:bg-accent/[0.02]"
+                }`}
               >
-                + Add column
+                <span
+                  className={`block text-sm font-medium leading-tight transition-colors ${
+                    selectedTemplate === null ? "text-accent" : "text-ink"
+                  }`}
+                >
+                  Custom
+                </span>
+                <span className="block text-[11px] text-muted leading-snug mt-0.5">
+                  Define your own columns
+                </span>
               </button>
+            </div>
+
+            {selectedTemplate === null && (
+              <div className="animate-card-enter">
+                <label className="block text-sm font-medium mb-1.5">Columns</label>
+                <div className="space-y-2">
+                  {columns.map((col, i) => (
+                    <div key={i} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={col}
+                        onChange={(e) => updateColumn(i, e.target.value)}
+                        placeholder={`Column ${i + 1}`}
+                        className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
+                      />
+                      {columns.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeColumn(i)}
+                          className="px-2 text-muted hover:text-ink transition-colors"
+                          aria-label="Remove column"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {columns.length < 5 && (
+                  <button
+                    type="button"
+                    onClick={addColumn}
+                    className="mt-2 text-sm text-accent hover:text-accent-hover transition-colors"
+                  >
+                    + Add column
+                  </button>
+                )}
+              </div>
             )}
           </div>
 

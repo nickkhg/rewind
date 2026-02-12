@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Logo } from "../components/layout/Logo";
-import type { AdminBoardDetail, AdminBoardSummary, GlobalStats } from "../lib/types";
+import type { AdminBoardDetail, AdminBoardSummary, GlobalStats, Template } from "../lib/types";
 import {
+  createAdminTemplate,
   deleteAdminBoard,
+  deleteAdminTemplate,
   fetchAdminBoardDetail,
   fetchAdminBoards,
   fetchAdminStats,
+  fetchAdminTemplates,
+  updateAdminTemplate,
   verifyAdminToken,
 } from "../lib/api";
 
@@ -137,6 +141,286 @@ function DeleteConfirmDialog({
   );
 }
 
+// --- Template components ---
+
+function TemplateForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial?: Template;
+  onSave: (data: { id: string; name: string; description: string; columns: string[]; position: number }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState(initial?.id ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [columns, setColumns] = useState<string[]>(initial?.columns ?? [""]);
+  const [position, setPosition] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const isEdit = !!initial;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    const trimmedCols = columns.map((c) => c.trim()).filter(Boolean);
+    if (!id.trim() || !name.trim()) return setError("ID and name are required");
+    if (trimmedCols.length === 0) return setError("At least one column is required");
+    setSaving(true);
+    try {
+      await onSave({ id: id.trim(), name: name.trim(), description: description.trim(), columns: trimmedCols, position });
+      onCancel();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-5 space-y-4">
+      <h3 className="font-display font-semibold text-sm">{isEdit ? "Edit template" : "New template"}</h3>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-muted mb-1">ID (slug)</label>
+          <input
+            type="text"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            disabled={isEdit}
+            placeholder="e.g. my-template"
+            className="w-full rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40 disabled:opacity-50"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-muted mb-1">Name</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. My Template"
+            className="w-full rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-muted mb-1">Description</label>
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Short description"
+          className="w-full rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-muted mb-1">Columns</label>
+        <div className="space-y-1.5">
+          {columns.map((col, i) => (
+            <div key={i} className="flex gap-2">
+              <input
+                type="text"
+                value={col}
+                onChange={(e) => setColumns((prev) => prev.map((c, j) => (j === i ? e.target.value : c)))}
+                placeholder={`Column ${i + 1}`}
+                className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
+              />
+              {columns.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setColumns((prev) => prev.filter((_, j) => j !== i))}
+                  className="px-2 text-muted hover:text-ink transition-colors"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {columns.length < 5 && (
+          <button
+            type="button"
+            onClick={() => setColumns((prev) => [...prev, ""])}
+            className="mt-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
+          >
+            + Add column
+          </button>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-xs text-muted mb-1">Sort position</label>
+        <input
+          type="number"
+          value={position}
+          onChange={(e) => setPosition(parseInt(e.target.value) || 0)}
+          className="w-20 rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
+        />
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="text-sm bg-accent text-white px-4 py-1.5 rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50"
+        >
+          {saving ? "Saving..." : isEdit ? "Update" : "Create"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-sm border border-border px-4 py-1.5 rounded-lg hover:bg-canvas transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function TemplatesPanel({
+  templates,
+  onReload,
+  getToken,
+}: {
+  templates: Template[];
+  onReload: () => void;
+  getToken: () => string;
+}) {
+  const [editing, setEditing] = useState<Template | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+
+  async function handleCreate(data: { id: string; name: string; description: string; columns: string[]; position: number }) {
+    await createAdminTemplate(getToken(), data);
+    setCreating(false);
+    onReload();
+  }
+
+  async function handleUpdate(data: { id: string; name: string; description: string; columns: string[]; position: number }) {
+    await updateAdminTemplate(getToken(), data.id, {
+      name: data.name,
+      description: data.description,
+      columns: data.columns,
+      position: data.position,
+    });
+    setEditing(null);
+    onReload();
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    try {
+      await deleteAdminTemplate(getToken(), deleteTarget.id);
+      setDeleteTarget(null);
+      onReload();
+    } catch {
+      setDeleteTarget(null);
+      onReload();
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-surface border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="font-display font-semibold text-sm">Templates ({templates.length})</h2>
+          <button
+            onClick={() => { setCreating(true); setEditing(null); }}
+            className="text-xs text-accent hover:text-accent-hover transition-colors"
+          >
+            + New template
+          </button>
+        </div>
+
+        {templates.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-muted">No templates yet</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted border-b border-border">
+                  <th className="px-4 py-2 font-medium">ID</th>
+                  <th className="px-4 py-2 font-medium">Name</th>
+                  <th className="px-4 py-2 font-medium">Description</th>
+                  <th className="px-4 py-2 font-medium">Columns</th>
+                  <th className="px-4 py-2 font-medium">Pos</th>
+                  <th className="px-4 py-2 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((t) => (
+                  <tr key={t.id} className="border-b border-border last:border-b-0 hover:bg-canvas transition-colors">
+                    <td className="px-4 py-2.5 font-mono text-xs">{t.id}</td>
+                    <td className="px-4 py-2.5 font-medium">{t.name}</td>
+                    <td className="px-4 py-2.5 text-muted truncate max-w-[200px]">{t.description}</td>
+                    <td className="px-4 py-2.5 text-muted">
+                      <div className="flex flex-wrap gap-1">
+                        {t.columns.map((col, i) => (
+                          <span key={i} className="text-xs bg-canvas border border-border rounded px-1.5 py-0.5">
+                            {col}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-muted">{templates.indexOf(t)}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setEditing(t); setCreating(false); }}
+                          className="text-xs text-accent hover:text-accent-hover transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(t)}
+                          className="text-xs text-red-500 hover:text-red-700 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {creating && (
+        <TemplateForm
+          onSave={handleCreate}
+          onCancel={() => setCreating(false)}
+        />
+      )}
+
+      {editing && (
+        <TemplateForm
+          initial={editing}
+          onSave={handleUpdate}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteConfirmDialog
+          boardTitle={`template "${deleteTarget.name}"`}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 // --- Main component ---
 
 export default function Admin() {
@@ -152,6 +436,8 @@ export default function Admin() {
   const [detail, setDetail] = useState<AdminBoardDetail | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminBoardSummary | null>(null);
   const [loadingData, setLoadingData] = useState(false);
+  const [tab, setTab] = useState<"boards" | "templates">("boards");
+  const [templates, setTemplates] = useState<Template[]>([]);
 
   const getToken = useCallback(() => {
     return sessionStorage.getItem(STORAGE_KEY) ?? "";
@@ -160,9 +446,14 @@ export default function Admin() {
   const loadDashboard = useCallback(async (t: string) => {
     setLoadingData(true);
     try {
-      const [s, b] = await Promise.all([fetchAdminStats(t), fetchAdminBoards(t)]);
+      const [s, b, tpls] = await Promise.all([
+        fetchAdminStats(t),
+        fetchAdminBoards(t),
+        fetchAdminTemplates(t),
+      ]);
       setStats(s);
       setBoards(b);
+      setTemplates(tpls);
     } catch {
       // Token may have expired
       sessionStorage.removeItem(STORAGE_KEY);
@@ -334,102 +625,129 @@ export default function Admin() {
           </div>
         )}
 
-        <div className="flex gap-6">
-          {/* Board table */}
-          <div className="flex-1 min-w-0">
-            <div className="bg-surface border border-border rounded-lg overflow-hidden">
-              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                <h2 className="font-display font-semibold text-sm">
-                  Boards ({boards.length})
-                </h2>
-                <button
-                  onClick={() => loadDashboard(getToken())}
-                  disabled={loadingData}
-                  className="text-xs text-muted hover:text-ink transition-colors disabled:opacity-50"
-                >
-                  {loadingData ? "Refreshing..." : "Refresh"}
-                </button>
-              </div>
-
-              {boards.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-muted">No boards yet</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-muted border-b border-border">
-                        <th className="px-4 py-2 font-medium">Title</th>
-                        <th className="px-4 py-2 font-medium">Cols</th>
-                        <th className="px-4 py-2 font-medium">Tickets</th>
-                        <th className="px-4 py-2 font-medium">Votes</th>
-                        <th className="px-4 py-2 font-medium">Online</th>
-                        <th className="px-4 py-2 font-medium">Created</th>
-                        <th className="px-4 py-2 font-medium"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {boards.map((b) => (
-                        <tr
-                          key={b.id}
-                          onClick={() => setSelectedId(selectedId === b.id ? null : b.id)}
-                          className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
-                            selectedId === b.id
-                              ? "bg-accent/5"
-                              : "hover:bg-canvas"
-                          }`}
-                        >
-                          <td className="px-4 py-2.5 font-medium truncate max-w-[200px]">
-                            {b.title}
-                            {b.is_blurred && (
-                              <span className="ml-1.5 text-xs text-muted" title="Blurred">
-                                blur
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2.5 text-muted">{b.column_count}</td>
-                          <td className="px-4 py-2.5 text-muted">{b.ticket_count}</td>
-                          <td className="px-4 py-2.5 text-muted">{b.vote_count}</td>
-                          <td className="px-4 py-2.5 text-muted">{b.online_participants}</td>
-                          <td className="px-4 py-2.5 text-muted text-xs">
-                            {new Date(b.created_at).toLocaleDateString()}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget(b);
-                              }}
-                              className="text-xs text-red-500 hover:text-red-700 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Detail panel */}
-          {detail && selectedId && (
-            <div className="w-80 shrink-0 hidden lg:block sticky top-20 self-start">
-              <BoardDetailPanel
-                detail={detail}
-                onClose={() => {
-                  setSelectedId(null);
-                  setDetail(null);
-                }}
-                onDelete={() => {
-                  const board = boards.find((b) => b.id === selectedId);
-                  if (board) setDeleteTarget(board);
-                }}
-              />
-            </div>
-          )}
+        {/* Tab switcher */}
+        <div className="flex gap-1 mb-4 border-b border-border">
+          {(["boards", "templates"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 text-sm font-medium capitalize transition-colors border-b-2 -mb-px ${
+                tab === t
+                  ? "border-accent text-accent"
+                  : "border-transparent text-muted hover:text-ink"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
+
+        {tab === "boards" && (
+          <div className="flex gap-6">
+            {/* Board table */}
+            <div className="flex-1 min-w-0">
+              <div className="bg-surface border border-border rounded-lg overflow-hidden">
+                <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                  <h2 className="font-display font-semibold text-sm">
+                    Boards ({boards.length})
+                  </h2>
+                  <button
+                    onClick={() => loadDashboard(getToken())}
+                    disabled={loadingData}
+                    className="text-xs text-muted hover:text-ink transition-colors disabled:opacity-50"
+                  >
+                    {loadingData ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                {boards.length === 0 ? (
+                  <div className="px-4 py-8 text-center text-sm text-muted">No boards yet</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-xs text-muted border-b border-border">
+                          <th className="px-4 py-2 font-medium">Title</th>
+                          <th className="px-4 py-2 font-medium">Cols</th>
+                          <th className="px-4 py-2 font-medium">Tickets</th>
+                          <th className="px-4 py-2 font-medium">Votes</th>
+                          <th className="px-4 py-2 font-medium">Online</th>
+                          <th className="px-4 py-2 font-medium">Created</th>
+                          <th className="px-4 py-2 font-medium"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {boards.map((b) => (
+                          <tr
+                            key={b.id}
+                            onClick={() => setSelectedId(selectedId === b.id ? null : b.id)}
+                            className={`border-b border-border last:border-b-0 cursor-pointer transition-colors ${
+                              selectedId === b.id
+                                ? "bg-accent/5"
+                                : "hover:bg-canvas"
+                            }`}
+                          >
+                            <td className="px-4 py-2.5 font-medium truncate max-w-[200px]">
+                              {b.title}
+                              {b.is_blurred && (
+                                <span className="ml-1.5 text-xs text-muted" title="Blurred">
+                                  blur
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-2.5 text-muted">{b.column_count}</td>
+                            <td className="px-4 py-2.5 text-muted">{b.ticket_count}</td>
+                            <td className="px-4 py-2.5 text-muted">{b.vote_count}</td>
+                            <td className="px-4 py-2.5 text-muted">{b.online_participants}</td>
+                            <td className="px-4 py-2.5 text-muted text-xs">
+                              {new Date(b.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget(b);
+                                }}
+                                className="text-xs text-red-500 hover:text-red-700 transition-colors"
+                              >
+                                Delete
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Detail panel */}
+            {detail && selectedId && (
+              <div className="w-80 shrink-0 hidden lg:block sticky top-20 self-start">
+                <BoardDetailPanel
+                  detail={detail}
+                  onClose={() => {
+                    setSelectedId(null);
+                    setDetail(null);
+                  }}
+                  onDelete={() => {
+                    const board = boards.find((b) => b.id === selectedId);
+                    if (board) setDeleteTarget(board);
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "templates" && (
+          <TemplatesPanel
+            templates={templates}
+            onReload={() => loadDashboard(getToken())}
+            getToken={getToken}
+          />
+        )}
       </div>
 
       {/* Delete confirmation */}

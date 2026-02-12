@@ -5,7 +5,7 @@ use time::Duration;
 
 use crate::db;
 use crate::error::AppError;
-use crate::models::{CreateBoardRequest, CreateBoardResponse, MyBoardSummary};
+use crate::models::{CreateBoardRequest, CreateBoardResponse, MyBoardSummary, Template};
 use crate::state::AppState;
 use chrono::Utc;
 use nanoid::nanoid;
@@ -80,6 +80,13 @@ pub async fn get_board(
 
     let count = state.participant_count(&board_id).await;
     Ok(Json(board.to_view_with_participants(count)))
+}
+
+pub async fn list_templates(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Template>>, AppError> {
+    let templates = db::list_templates(&state.db).await?;
+    Ok(Json(templates))
 }
 
 pub async fn my_boards(

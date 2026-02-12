@@ -4,7 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::request::Parts;
 use axum::Json;
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::db;
 use crate::error::AppError;
@@ -168,6 +168,101 @@ pub async fn get_board_detail(
         columns,
         online_participants: online,
     }))
+}
+
+// --- Template management ---
+
+pub async fn list_templates(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<crate::models::Template>>, AppError> {
+    let templates = db::list_templates(&state.db).await?;
+    Ok(Json(templates))
+}
+
+#[derive(Deserialize)]
+pub struct CreateTemplateRequest {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub position: i32,
+}
+
+pub async fn create_template(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Json(req): Json<CreateTemplateRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if req.id.trim().is_empty() || req.name.trim().is_empty() {
+        return Err(AppError::BadRequest("ID and name are required".to_string()));
+    }
+    if req.columns.is_empty() {
+        return Err(AppError::BadRequest(
+            "At least one column is required".to_string(),
+        ));
+    }
+    db::create_template(
+        &state.db,
+        &req.id,
+        &req.name,
+        &req.description,
+        &req.columns,
+        req.position,
+    )
+    .await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTemplateRequest {
+    pub name: String,
+    pub description: String,
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub position: i32,
+}
+
+pub async fn update_template(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Path(template_id): Path<String>,
+    Json(req): Json<UpdateTemplateRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if req.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Name is required".to_string()));
+    }
+    if req.columns.is_empty() {
+        return Err(AppError::BadRequest(
+            "At least one column is required".to_string(),
+        ));
+    }
+    let updated = db::update_template(
+        &state.db,
+        &template_id,
+        &req.name,
+        &req.description,
+        &req.columns,
+        req.position,
+    )
+    .await?;
+    if !updated {
+        return Err(AppError::NotFound("Template not found".to_string()));
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn delete_template(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Path(template_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let deleted = db::delete_template(&state.db, &template_id).await?;
+    if !deleted {
+        return Err(AppError::NotFound("Template not found".to_string()));
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
 }
 
 pub async fn delete_board(

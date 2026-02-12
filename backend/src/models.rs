@@ -74,6 +74,14 @@ pub struct MyBoardSummary {
     pub is_anonymous: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Template {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub columns: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateBoardRequest {
     pub title: String,
