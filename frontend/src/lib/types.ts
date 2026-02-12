@@ -48,6 +48,15 @@ export type ServerMessage =
   | { type: "Authenticated"; payload: { is_facilitator: boolean; participant_id: string } }
   | { type: "Error"; payload: { message: string } };
 
+export interface MyBoardSummary {
+  id: string;
+  title: string;
+  created_at: string;
+  column_count: number;
+  ticket_count: number;
+  is_anonymous: boolean;
+}
+
 export type SortMode = "newest" | "most-votes";
 
 // --- Admin types ---

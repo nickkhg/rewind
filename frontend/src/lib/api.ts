@@ -1,6 +1,7 @@
 import type {
   CreateBoardRequest,
   CreateBoardResponse,
+  MyBoardSummary,
   GlobalStats,
   AdminBoardSummary,
   AdminBoardDetail,
@@ -12,7 +13,16 @@ export async function createBoard(req: CreateBoardRequest): Promise<CreateBoardR
   const res = await fetch(`${BASE}/api/boards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function fetchMyBoards(): Promise<MyBoardSummary[]> {
+  const res = await fetch(`${BASE}/api/my-boards`, {
+    credentials: "include",
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

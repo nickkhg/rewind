@@ -26,7 +26,7 @@ export default function Board() {
   useEffect(() => {
     if (participantName || !id) return;
     let cancelled = false;
-    fetch(`${BASE}/api/boards/${id}`)
+    fetch(`${BASE}/api/boards/${id}`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled) return;

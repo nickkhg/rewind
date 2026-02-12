@@ -48,6 +48,7 @@ async fn main() {
     let mut app = Router::new()
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))
+        .route("/api/my-boards", get(routes::boards::my_boards))
         .route("/ws/boards/{id}", get(routes::ws::ws_handler))
         .route("/api/admin/verify", post(routes::admin::verify_token))
         .route("/api/admin/stats", get(routes::admin::global_stats))

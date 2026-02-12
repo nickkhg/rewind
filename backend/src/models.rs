@@ -11,6 +11,7 @@ pub struct Board {
     pub is_anonymous: bool,
     pub created_at: DateTime<Utc>,
     pub facilitator_token: String,
+    pub facilitator_id: Option<String>,
     pub participants: Vec<Participant>,
 }
 
@@ -61,6 +62,16 @@ impl Board {
             participant_count: count,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MyBoardSummary {
+    pub id: String,
+    pub title: String,
+    pub created_at: DateTime<Utc>,
+    pub column_count: i64,
+    pub ticket_count: i64,
+    pub is_anonymous: bool,
 }
 
 #[derive(Debug, Deserialize)]

@@ -38,12 +38,10 @@ export function useWebSocket(boardId: string, participantName: string) {
 
       ws.onopen = () => {
         setConnected(true);
-        const facilitatorToken = sessionStorage.getItem(`facilitator_${boardId}`);
         const joinMsg: ClientMessage = {
           type: "Join",
           payload: {
             participant_name: participantName,
-            ...(facilitatorToken ? { facilitator_token: facilitatorToken } : {}),
           },
         };
         ws.send(JSON.stringify(joinMsg));

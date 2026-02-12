@@ -1,9 +1,25 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
-import { createBoard } from "../lib/api";
+import { createBoard, fetchMyBoards } from "../lib/api";
+import type { MyBoardSummary } from "../lib/types";
 
 const DEFAULT_COLUMNS = ["Went Well", "To Improve", "Action Items"];
+
+function formatRelativeDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60_000);
+  const diffHours = Math.floor(diffMs / 3_600_000);
+  const diffDays = Math.floor(diffMs / 86_400_000);
+
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
 
 export default function Home() {
   const navigate = useNavigate();
@@ -13,6 +29,13 @@ export default function Home() {
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [myBoards, setMyBoards] = useState<MyBoardSummary[]>([]);
+
+  useEffect(() => {
+    fetchMyBoards()
+      .then(setMyBoards)
+      .catch(() => {});
+  }, []);
 
   function updateColumn(index: number, value: string) {
     setColumns((prev) => prev.map((c, i) => (i === index ? value : c)));
@@ -45,9 +68,7 @@ export default function Home() {
         columns: trimmedCols,
         is_anonymous: isAnonymous || undefined,
       });
-      sessionStorage.setItem(`facilitator_${res.board.id}`, res.facilitator_token);
       if (isAnonymous) {
-        // Store a sentinel so Board.tsx skips the name prompt
         sessionStorage.setItem(`participant_name_${res.board.id}`, "__anonymous__");
       } else {
         sessionStorage.setItem(`participant_name_${res.board.id}`, trimmedName);
@@ -161,6 +182,39 @@ export default function Home() {
             {loading ? "Creating..." : "Start Retro"}
           </button>
         </form>
+
+        {myBoards.length > 0 && (
+          <div className="mt-10 animate-card-enter">
+            <h2 className="font-display text-lg font-semibold mb-4 text-ink/80">Your boards</h2>
+            <div className="space-y-2">
+              {myBoards.map((b, i) => (
+                <Link
+                  key={b.id}
+                  to={`/board/${b.id}`}
+                  className="group block bg-surface rounded-xl border border-border px-5 py-3.5 hover:border-accent/40 hover:shadow-sm transition-all"
+                  style={{ animationDelay: `${i * 60}ms` }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="font-display font-medium text-ink group-hover:text-accent transition-colors truncate block">
+                        {b.title}
+                      </span>
+                      <span className="text-xs text-muted mt-0.5 block">
+                        {b.column_count} {b.column_count === 1 ? "column" : "columns"}
+                        {" \u00B7 "}
+                        {b.ticket_count} {b.ticket_count === 1 ? "card" : "cards"}
+                        {b.is_anonymous && " \u00B7 anonymous"}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted whitespace-nowrap shrink-0">
+                      {formatRelativeDate(b.created_at)}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         <p className="text-center mt-4">
           <a

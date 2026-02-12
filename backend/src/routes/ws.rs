@@ -1,6 +1,7 @@
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::response::Response;
+use axum_extra::extract::CookieJar;
 use futures_util::{SinkExt, StreamExt};
 use nanoid::nanoid;
 use tracing::{info, warn};
@@ -12,11 +13,17 @@ use crate::state::AppState;
 use chrono::Utc;
 
 pub async fn ws_handler(
+    jar: CookieJar,
     ws: WebSocketUpgrade,
     Path(board_id): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, board_id, state))
+    let facilitator_id_from_cookie = jar
+        .get("facilitator_id")
+        .map(|c| c.value().to_string());
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, board_id, state, facilitator_id_from_cookie)
+    })
 }
 
 async fn broadcast_board_state(state: &AppState, board_id: &str) {
@@ -30,7 +37,12 @@ async fn broadcast_board_state(state: &AppState, board_id: &str) {
     let _ = tx.send(ServerMessage::BoardState { board: view });
 }
 
-async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
+async fn handle_socket(
+    socket: WebSocket,
+    board_id: String,
+    state: AppState,
+    facilitator_id_from_cookie: Option<String>,
+) {
     let (mut sender, mut receiver) = socket.split();
 
     // Wait for Join message first
@@ -44,7 +56,7 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                     }) => {
                         let participant_id = nanoid!(8);
 
-                        // Verify board exists and check facilitator token
+                        // Verify board exists and check facilitator auth
                         let token = match db::get_board_facilitator_token(&state.db, &board_id)
                             .await
                         {
@@ -76,10 +88,24 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                             }
                         };
 
-                        let is_facilitator = facilitator_token
+                        // Dual auth: cookie-based OR token-based
+                        let token_match = facilitator_token
                             .as_ref()
                             .map(|t| t == &token)
                             .unwrap_or(false);
+
+                        let cookie_match = if let Some(ref fid) = facilitator_id_from_cookie {
+                            db::get_board_facilitator_id(&state.db, &board_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|board_fid| &board_fid == fid)
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        };
+
+                        let is_facilitator = token_match || cookie_match;
 
                         // For anonymous boards, discard the participant name
                         let board_anonymous = db::get_board_anonymous(&state.db, &board_id)

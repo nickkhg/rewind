@@ -11,6 +11,7 @@ pub async fn create_board(
     id: &str,
     title: &str,
     facilitator_token: &str,
+    facilitator_id: &str,
     columns: &[(String, String)], // (id, name)
     created_at: DateTime<Utc>,
     is_anonymous: bool,
@@ -18,11 +19,12 @@ pub async fn create_board(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO boards (id, title, facilitator_token, is_blurred, is_anonymous, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO boards (id, title, facilitator_token, facilitator_id, is_blurred, is_anonymous, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(id)
     .bind(title)
     .bind(facilitator_token)
+    .bind(facilitator_id)
     .bind(true)
     .bind(is_anonymous)
     .bind(created_at)
@@ -58,13 +60,14 @@ pub async fn create_board(
         is_anonymous,
         created_at,
         facilitator_token: facilitator_token.to_string(),
+        facilitator_id: Some(facilitator_id.to_string()),
         participants: Vec::new(),
     })
 }
 
 pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, sqlx::Error> {
     let row = sqlx::query_as::<_, BoardRow>(
-        "SELECT id, title, is_blurred, is_anonymous, facilitator_token, created_at FROM boards WHERE id = $1",
+        "SELECT id, title, is_blurred, is_anonymous, facilitator_token, facilitator_id, created_at FROM boards WHERE id = $1",
     )
     .bind(board_id)
     .fetch_optional(pool)
@@ -153,6 +156,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         is_anonymous: board_row.is_anonymous,
         created_at: board_row.created_at,
         facilitator_token: board_row.facilitator_token,
+        facilitator_id: board_row.facilitator_id,
         participants: Vec::new(),
     }))
 }
@@ -182,6 +186,54 @@ pub async fn get_board_anonymous(
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| r.is_anonymous))
+}
+
+pub async fn get_board_facilitator_id(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query_as::<_, FacilitatorIdRow>(
+        "SELECT facilitator_id FROM boards WHERE id = $1",
+    )
+    .bind(board_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| r.facilitator_id))
+}
+
+pub async fn get_boards_by_facilitator_id(
+    pool: &PgPool,
+    facilitator_id: &str,
+) -> Result<Vec<crate::models::MyBoardSummary>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, MyBoardRow>(
+        r#"
+        SELECT
+            b.id,
+            b.title,
+            b.created_at,
+            b.is_anonymous,
+            (SELECT COUNT(*) FROM columns c WHERE c.board_id = b.id) AS column_count,
+            (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id WHERE c.board_id = b.id) AS ticket_count
+        FROM boards b
+        WHERE b.facilitator_id = $1
+        ORDER BY b.created_at DESC
+        "#,
+    )
+    .bind(facilitator_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| crate::models::MyBoardSummary {
+            id: r.id,
+            title: r.title,
+            created_at: r.created_at,
+            column_count: r.column_count,
+            ticket_count: r.ticket_count,
+            is_anonymous: r.is_anonymous,
+        })
+        .collect())
 }
 
 // --- Tickets ---
@@ -361,6 +413,7 @@ struct BoardRow {
     is_blurred: bool,
     is_anonymous: bool,
     facilitator_token: String,
+    facilitator_id: Option<String>,
     created_at: DateTime<Utc>,
 }
 
@@ -406,6 +459,21 @@ struct BlurRow {
 #[derive(sqlx::FromRow)]
 struct AnonymousRow {
     is_anonymous: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct FacilitatorIdRow {
+    facilitator_id: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct MyBoardRow {
+    id: String,
+    title: String,
+    created_at: DateTime<Utc>,
+    is_anonymous: bool,
+    column_count: i64,
+    ticket_count: i64,
 }
 
 #[derive(sqlx::FromRow)]

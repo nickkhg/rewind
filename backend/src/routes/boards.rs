@@ -1,17 +1,21 @@
 use axum::extract::{Path, State};
 use axum::Json;
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use time::Duration;
 
 use crate::db;
 use crate::error::AppError;
-use crate::models::{CreateBoardRequest, CreateBoardResponse};
+use crate::models::{CreateBoardRequest, CreateBoardResponse, MyBoardSummary};
 use crate::state::AppState;
 use chrono::Utc;
 use nanoid::nanoid;
+use uuid::Uuid;
 
 pub async fn create_board(
     State(state): State<AppState>,
+    jar: CookieJar,
     Json(req): Json<CreateBoardRequest>,
-) -> Result<Json<CreateBoardResponse>, AppError> {
+) -> Result<(CookieJar, Json<CreateBoardResponse>), AppError> {
     if req.title.trim().is_empty() {
         return Err(AppError::BadRequest("Title is required".to_string()));
     }
@@ -20,6 +24,11 @@ pub async fn create_board(
             "At least one column is required".to_string(),
         ));
     }
+
+    let facilitator_id = jar
+        .get("facilitator_id")
+        .map(|c| c.value().to_string())
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     let board_id = nanoid!(10);
     let facilitator_token = nanoid!(32);
@@ -36,6 +45,7 @@ pub async fn create_board(
         &board_id,
         &req.title,
         &facilitator_token,
+        &facilitator_id,
         &columns,
         created_at,
         req.is_anonymous,
@@ -44,10 +54,20 @@ pub async fn create_board(
 
     let view = board.to_view_with_participants(0);
 
-    Ok(Json(CreateBoardResponse {
-        board: view,
-        facilitator_token,
-    }))
+    let cookie = Cookie::build(("facilitator_id", facilitator_id))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .max_age(Duration::days(365));
+    let jar = jar.add(cookie);
+
+    Ok((
+        jar,
+        Json(CreateBoardResponse {
+            board: view,
+            facilitator_token,
+        }),
+    ))
 }
 
 pub async fn get_board(
@@ -60,4 +80,17 @@ pub async fn get_board(
 
     let count = state.participant_count(&board_id).await;
     Ok(Json(board.to_view_with_participants(count)))
+}
+
+pub async fn my_boards(
+    State(state): State<AppState>,
+    jar: CookieJar,
+) -> Result<Json<Vec<MyBoardSummary>>, AppError> {
+    let facilitator_id = match jar.get("facilitator_id") {
+        Some(c) => c.value().to_string(),
+        None => return Ok(Json(Vec::new())),
+    };
+
+    let boards = db::get_boards_by_facilitator_id(&state.db, &facilitator_id).await?;
+    Ok(Json(boards))
 }
