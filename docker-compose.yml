@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: rewind
+      POSTGRES_PASSWORD: rewind
+      POSTGRES_DB: rewind
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rewind"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgres://rewind:rewind@db:5432/rewind
+      STATIC_DIR: /srv/static
+      PORT: "3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

@@ -13,7 +13,8 @@
         }
       },
       "env": {
-        "RUST_LOG": "debug"
+        "RUST_LOG": "debug",
+        "DATABASE_URL": "postgres://rewind:rewind@localhost:5432/rewind"
       },
       "cwd": "${workspaceFolder}/backend"
     },

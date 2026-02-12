@@ -1,3 +1,4 @@
+mod db;
 mod error;
 mod models;
 mod protocol;
@@ -6,6 +7,7 @@ mod state;
 
 use axum::routing::{get, post};
 use axum::Router;
+use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use std::path::PathBuf;
 use tower_http::cors::CorsLayer;
@@ -19,7 +21,23 @@ async fn main() {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
 
-    let state = AppState::new();
+    let database_url =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    let db = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
+        .await
+        .expect("Failed to connect to database");
+
+    sqlx::migrate!()
+        .run(&db)
+        .await
+        .expect("Failed to run database migrations");
+
+    tracing::info!("database connected and migrations applied");
+
+    let state = AppState::new(db);
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_default();
 
     let mut app = Router::new()

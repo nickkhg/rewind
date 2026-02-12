@@ -48,14 +48,14 @@ pub struct BoardView {
 }
 
 impl Board {
-    pub fn to_view(&self) -> BoardView {
+    pub fn to_view_with_participants(&self, count: usize) -> BoardView {
         BoardView {
             id: self.id.clone(),
             title: self.title.clone(),
             columns: self.columns.clone(),
             is_blurred: self.is_blurred,
             created_at: self.created_at,
-            participant_count: self.participants.len(),
+            participant_count: count,
         }
     }
 }

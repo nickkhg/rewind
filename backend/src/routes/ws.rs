@@ -5,11 +5,11 @@ use futures_util::{SinkExt, StreamExt};
 use nanoid::nanoid;
 use tracing::{info, warn};
 
-use crate::models::{Participant, Ticket};
+use crate::db;
+use crate::models::Participant;
 use crate::protocol::{ClientMessage, ServerMessage};
 use crate::state::AppState;
 use chrono::Utc;
-use std::collections::HashSet;
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -19,11 +19,22 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, board_id, state))
 }
 
+async fn broadcast_board_state(state: &AppState, board_id: &str) {
+    let board = match db::get_board(&state.db, board_id).await {
+        Ok(Some(b)) => b,
+        _ => return,
+    };
+    let count = state.participant_count(board_id).await;
+    let view = board.to_view_with_participants(count);
+    let tx = state.get_or_create_channel(board_id).await;
+    let _ = tx.send(ServerMessage::BoardState { board: view });
+}
+
 async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
     let (mut sender, mut receiver) = socket.split();
 
     // Wait for Join message first
-    let (participant_id, is_facilitator) = loop {
+    let (participant_id, participant_name, is_facilitator) = loop {
         match receiver.next().await {
             Some(Ok(Message::Text(text))) => {
                 match serde_json::from_str::<ClientMessage>(&text) {
@@ -32,32 +43,55 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                         facilitator_token,
                     }) => {
                         let participant_id = nanoid!(8);
-                        let mut boards = state.boards.write().await;
-                        let Some(board) = boards.get_mut(&board_id) else {
-                            let _ = sender
-                                .send(Message::Text(
-                                    serde_json::to_string(&ServerMessage::Error {
-                                        message: "Board not found".to_string(),
-                                    })
-                                    .unwrap()
-                                    .into(),
-                                ))
-                                .await;
-                            return;
+
+                        // Verify board exists and check facilitator token
+                        let token = match db::get_board_facilitator_token(&state.db, &board_id)
+                            .await
+                        {
+                            Ok(Some(t)) => t,
+                            Ok(None) => {
+                                let _ = sender
+                                    .send(Message::Text(
+                                        serde_json::to_string(&ServerMessage::Error {
+                                            message: "Board not found".to_string(),
+                                        })
+                                        .unwrap()
+                                        .into(),
+                                    ))
+                                    .await;
+                                return;
+                            }
+                            Err(e) => {
+                                warn!("DB error during join: {e}");
+                                let _ = sender
+                                    .send(Message::Text(
+                                        serde_json::to_string(&ServerMessage::Error {
+                                            message: "Internal error".to_string(),
+                                        })
+                                        .unwrap()
+                                        .into(),
+                                    ))
+                                    .await;
+                                return;
+                            }
                         };
 
                         let is_facilitator = facilitator_token
                             .as_ref()
-                            .map(|t| t == &board.facilitator_token)
+                            .map(|t| t == &token)
                             .unwrap_or(false);
 
-                        board.participants.push(Participant {
-                            id: participant_id.clone(),
-                            name: participant_name,
-                        });
-
-                        let board_view = board.to_view();
-                        drop(boards);
+                        // Add participant to in-memory map
+                        {
+                            let mut participants = state.participants.write().await;
+                            participants
+                                .entry(board_id.clone())
+                                .or_default()
+                                .push(Participant {
+                                    id: participant_id.clone(),
+                                    name: participant_name.clone(),
+                                });
+                        }
 
                         // Send Authenticated
                         let auth_msg = ServerMessage::Authenticated {
@@ -71,11 +105,9 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                             .await;
 
                         // Broadcast updated state (new participant count)
-                        let tx = state.get_or_create_channel(&board_id).await;
-                        let state_msg = ServerMessage::BoardState { board: board_view };
-                        let _ = tx.send(state_msg);
+                        broadcast_board_state(&state, &board_id).await;
 
-                        break (participant_id, is_facilitator);
+                        break (participant_id, participant_name, is_facilitator);
                     }
                     Ok(_) => {
                         let _ = sender
@@ -114,10 +146,10 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
 
     // Send current board state
     {
-        let boards = state.boards.read().await;
-        if let Some(board) = boards.get(&board_id) {
+        if let Ok(Some(board)) = db::get_board(&state.db, &board_id).await {
+            let count = state.participant_count(&board_id).await;
             let msg = ServerMessage::BoardState {
-                board: board.to_view(),
+                board: board.to_view_with_participants(count),
             };
             let _ = sender
                 .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
@@ -139,7 +171,7 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
     let state_clone = state.clone();
     let board_id_clone = board_id.clone();
     let participant_id_clone = participant_id.clone();
-    let tx_clone = tx.clone();
+    let participant_name_clone = participant_name.clone();
 
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
@@ -155,23 +187,18 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                 }
             };
 
-            let broadcast_state = handle_message(
+            let should_broadcast = handle_message(
                 &state_clone,
                 &board_id_clone,
                 &participant_id_clone,
+                &participant_name_clone,
                 is_facilitator,
                 client_msg,
             )
             .await;
 
-            if broadcast_state {
-                let boards = state_clone.boards.read().await;
-                if let Some(board) = boards.get(&board_id_clone) {
-                    let msg = ServerMessage::BoardState {
-                        board: board.to_view(),
-                    };
-                    let _ = tx_clone.send(msg);
-                }
+            if should_broadcast {
+                broadcast_board_state(&state_clone, &board_id_clone).await;
             }
         }
     });
@@ -184,15 +211,16 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
 
     // Remove participant on disconnect
     {
-        let mut boards = state.boards.write().await;
-        if let Some(board) = boards.get_mut(&board_id) {
-            board.participants.retain(|p| p.id != participant_id);
-            let view = board.to_view();
-            drop(boards);
-            let msg = ServerMessage::BoardState { board: view };
-            let _ = tx.send(msg);
+        let mut participants = state.participants.write().await;
+        if let Some(list) = participants.get_mut(&board_id) {
+            list.retain(|p| p.id != participant_id);
+            if list.is_empty() {
+                participants.remove(&board_id);
+            }
         }
     }
+
+    broadcast_board_state(&state, &board_id).await;
 
     info!(participant_id, board_id, "participant left");
 }
@@ -201,91 +229,96 @@ async fn handle_message(
     state: &AppState,
     board_id: &str,
     participant_id: &str,
+    participant_name: &str,
     is_facilitator: bool,
     msg: ClientMessage,
 ) -> bool {
-    let mut boards = state.boards.write().await;
-    let Some(board) = boards.get_mut(board_id) else {
-        return false;
-    };
-
     match msg {
         ClientMessage::Join { .. } => false,
 
         ClientMessage::AddTicket { column_id, content } => {
-            let author_name = board
-                .participants
-                .iter()
-                .find(|p| p.id == participant_id)
-                .map(|p| p.name.clone())
-                .unwrap_or_default();
+            // Verify column belongs to this board
+            match db::column_belongs_to_board(&state.db, &column_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
 
-            if let Some(col) = board.columns.iter_mut().find(|c| c.id == column_id) {
-                col.tickets.push(Ticket {
-                    id: nanoid!(8),
-                    content,
-                    author_id: participant_id.to_string(),
-                    author_name,
-                    votes: HashSet::new(),
-                    created_at: Utc::now(),
-                });
-                true
-            } else {
-                false
+            let ticket_id = nanoid!(8);
+            match db::add_ticket(
+                &state.db,
+                &ticket_id,
+                &column_id,
+                &content,
+                participant_id,
+                participant_name,
+                Utc::now(),
+            )
+            .await
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to add ticket: {e}");
+                    false
+                }
             }
         }
 
         ClientMessage::RemoveTicket { ticket_id } => {
-            for col in &mut board.columns {
-                let before = col.tickets.len();
-                col.tickets.retain(|t| {
-                    if t.id == ticket_id {
-                        // Author or facilitator can remove
-                        t.author_id != participant_id && !is_facilitator
-                    } else {
-                        true
-                    }
-                });
-                if col.tickets.len() != before {
-                    return true;
+            // Check authorization: author or facilitator
+            match db::get_ticket_author(&state.db, &ticket_id).await {
+                Ok(Some(author_id)) if author_id == participant_id || is_facilitator => {}
+                _ => return false,
+            }
+
+            match db::remove_ticket(&state.db, &ticket_id).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to remove ticket: {e}");
+                    false
                 }
             }
-            false
         }
 
         ClientMessage::EditTicket { ticket_id, content } => {
-            for col in &mut board.columns {
-                if let Some(ticket) = col.tickets.iter_mut().find(|t| t.id == ticket_id) {
-                    if ticket.author_id == participant_id {
-                        ticket.content = content;
-                        return true;
-                    }
-                    return false;
+            // Only author can edit
+            match db::get_ticket_author(&state.db, &ticket_id).await {
+                Ok(Some(author_id)) if author_id == participant_id => {}
+                _ => return false,
+            }
+
+            match db::edit_ticket(&state.db, &ticket_id, &content).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to edit ticket: {e}");
+                    false
                 }
             }
-            false
         }
 
         ClientMessage::ToggleVote { ticket_id } => {
-            for col in &mut board.columns {
-                if let Some(ticket) = col.tickets.iter_mut().find(|t| t.id == ticket_id) {
-                    if ticket.votes.contains(participant_id) {
-                        ticket.votes.remove(participant_id);
-                    } else {
-                        ticket.votes.insert(participant_id.to_string());
-                    }
-                    return true;
+            match db::toggle_vote(&state.db, &ticket_id, participant_id).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to toggle vote: {e}");
+                    false
                 }
             }
-            false
         }
 
         ClientMessage::ToggleBlur => {
-            if is_facilitator {
-                board.is_blurred = !board.is_blurred;
-                true
-            } else {
-                false
+            if !is_facilitator {
+                return false;
+            }
+            let current = match db::get_blur_state(&state.db, board_id).await {
+                Ok(Some(v)) => v,
+                _ => return false,
+            };
+            match db::set_blur(&state.db, board_id, !current).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to toggle blur: {e}");
+                    false
+                }
             }
         }
     }

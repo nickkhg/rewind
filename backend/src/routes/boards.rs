@@ -1,8 +1,9 @@
 use axum::extract::{Path, State};
 use axum::Json;
 
+use crate::db;
 use crate::error::AppError;
-use crate::models::{Board, Column, CreateBoardRequest, CreateBoardResponse};
+use crate::models::{CreateBoardRequest, CreateBoardResponse};
 use crate::state::AppState;
 use chrono::Utc;
 use nanoid::nanoid;
@@ -22,29 +23,25 @@ pub async fn create_board(
 
     let board_id = nanoid!(10);
     let facilitator_token = nanoid!(32);
+    let created_at = Utc::now();
 
-    let columns = req
+    let columns: Vec<(String, String)> = req
         .columns
         .into_iter()
-        .map(|name| Column {
-            id: nanoid!(8),
-            name,
-            tickets: Vec::new(),
-        })
+        .map(|name| (nanoid!(8), name))
         .collect();
 
-    let board = Board {
-        id: board_id.clone(),
-        title: req.title,
-        columns,
-        is_blurred: true,
-        created_at: Utc::now(),
-        facilitator_token: facilitator_token.clone(),
-        participants: Vec::new(),
-    };
+    let board = db::create_board(
+        &state.db,
+        &board_id,
+        &req.title,
+        &facilitator_token,
+        &columns,
+        created_at,
+    )
+    .await?;
 
-    let view = board.to_view();
-    state.boards.write().await.insert(board_id, board);
+    let view = board.to_view_with_participants(0);
 
     Ok(Json(CreateBoardResponse {
         board: view,
@@ -56,9 +53,10 @@ pub async fn get_board(
     State(state): State<AppState>,
     Path(board_id): Path<String>,
 ) -> Result<Json<crate::models::BoardView>, AppError> {
-    let boards = state.boards.read().await;
-    let board = boards
-        .get(&board_id)
+    let board = db::get_board(&state.db, &board_id)
+        .await?
         .ok_or_else(|| AppError::NotFound("Board not found".to_string()))?;
-    Ok(Json(board.to_view()))
+
+    let count = state.participant_count(&board_id).await;
+    Ok(Json(board.to_view_with_participants(count)))
 }
