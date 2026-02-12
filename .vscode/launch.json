@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Backend: Debug",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "-p", "rewind-backend", "--bin", "rewind-backend"],
+        "filter": {
+          "name": "rewind-backend",
+          "kind": "bin"
+        }
+      },
+      "env": {
+        "RUST_LOG": "debug"
+      },
+      "cwd": "${workspaceFolder}/backend"
+    },
+    {
+      "name": "Frontend: Debug (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "sourceMapPathOverrides": {
+        "webpack:///./src/*": "${webRoot}/*"
+      },
+      "preLaunchTask": "Frontend: vite dev"
+    },
+    {
+      "name": "Frontend: Debug (Edge)",
+      "type": "msedge",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "preLaunchTask": "Frontend: vite dev"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack: Backend + Frontend",
+      "configurations": ["Backend: Debug", "Frontend: Debug (Chrome)"],
+      "stopAll": true
+    }
+  ]
+}
