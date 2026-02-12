@@ -25,9 +25,9 @@ cargo check --workspace
 
 Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri/` (Tauri v2 desktop wrapper). Cargo workspace at root, pnpm workspace for frontend.
 
-**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (in-memory state). REST is used only for board creation (`POST /api/boards`). All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are ephemeral — no database, no persistence.
+**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`) and templates (`GET /api/templates`). All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL.
 
-**Backend state:** `AppState` holds `Arc<RwLock<HashMap<String, Board>>>` for boards and a parallel map of `tokio::sync::broadcast` channels (capacity 64) for WebSocket fan-out. Write lock is held during mutation, released before broadcast.
+**Backend state:** `AppState` holds a `PgPool` for database access and a parallel map of `tokio::sync::broadcast` channels (capacity 64) for WebSocket fan-out plus in-memory participant tracking.
 
 **Frontend state:** Zustand store (`boardStore.ts`) holds board, participantId, isFacilitator, isConnected, sortMode. The `useWebSocket` hook connects on mount, sends Join with name + optional facilitator token from `sessionStorage`, and dispatches server messages to the store. Auto-reconnects on close (2s delay).
 

@@ -2,7 +2,7 @@
 
 A real-time retrospective tool for teams. Run column-based retro sessions where everyone collaborates live — as a website or macOS desktop app.
 
-Boards are ephemeral: no accounts, no persistence. The facilitator creates a board, shares a link, and the team adds cards, votes, and reveals together.
+No accounts needed. The facilitator creates a board, shares a link, and the team adds cards, votes, and reveals together. Boards are persisted in PostgreSQL so they survive server restarts.
 
 <p align="center">
   <img src="docs/screenshots/board.png" alt="Board view — light mode" width="720" />
