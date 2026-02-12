@@ -38,6 +38,7 @@ pub async fn create_board(
         &facilitator_token,
         &columns,
         created_at,
+        req.is_anonymous,
     )
     .await?;
 

@@ -86,12 +86,14 @@ export function TicketCard({ ticket, color, send }: TicketProps) {
 
       {/* Footer: author, votes, actions */}
       <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-border/40">
-        <span
-          className="text-xs text-muted truncate max-w-[120px] transition-[filter] duration-500 ease-out"
-          style={{ filter: isBlurred ? "blur(8px)" : "blur(0)" }}
-        >
-          {ticket.author_name}
-        </span>
+        {!board?.is_anonymous && (
+          <span
+            className="text-xs text-muted truncate max-w-[120px] transition-[filter] duration-500 ease-out"
+            style={{ filter: isBlurred ? "blur(8px)" : "blur(0)" }}
+          >
+            {ticket.author_name}
+          </span>
+        )}
         <div className="flex items-center gap-2">
           <VoteButton
             ticketId={ticket.id}

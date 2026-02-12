@@ -13,16 +13,18 @@ pub async fn create_board(
     facilitator_token: &str,
     columns: &[(String, String)], // (id, name)
     created_at: DateTime<Utc>,
+    is_anonymous: bool,
 ) -> Result<Board, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO boards (id, title, facilitator_token, is_blurred, created_at) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO boards (id, title, facilitator_token, is_blurred, is_anonymous, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(id)
     .bind(title)
     .bind(facilitator_token)
     .bind(true)
+    .bind(is_anonymous)
     .bind(created_at)
     .execute(&mut *tx)
     .await?;
@@ -53,6 +55,7 @@ pub async fn create_board(
         title: title.to_string(),
         columns: cols,
         is_blurred: true,
+        is_anonymous,
         created_at,
         facilitator_token: facilitator_token.to_string(),
         participants: Vec::new(),
@@ -61,7 +64,7 @@ pub async fn create_board(
 
 pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, sqlx::Error> {
     let row = sqlx::query_as::<_, BoardRow>(
-        "SELECT id, title, is_blurred, facilitator_token, created_at FROM boards WHERE id = $1",
+        "SELECT id, title, is_blurred, is_anonymous, facilitator_token, created_at FROM boards WHERE id = $1",
     )
     .bind(board_id)
     .fetch_optional(pool)
@@ -147,6 +150,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         title: board_row.title,
         columns,
         is_blurred: board_row.is_blurred,
+        is_anonymous: board_row.is_anonymous,
         created_at: board_row.created_at,
         facilitator_token: board_row.facilitator_token,
         participants: Vec::new(),
@@ -165,6 +169,19 @@ pub async fn get_board_facilitator_token(
     .await?;
 
     Ok(row.map(|r| r.facilitator_token))
+}
+
+pub async fn get_board_anonymous(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    let row = sqlx::query_as::<_, AnonymousRow>(
+        "SELECT is_anonymous FROM boards WHERE id = $1",
+    )
+    .bind(board_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| r.is_anonymous))
 }
 
 // --- Tickets ---
@@ -342,6 +359,7 @@ struct BoardRow {
     id: String,
     title: String,
     is_blurred: bool,
+    is_anonymous: bool,
     facilitator_token: String,
     created_at: DateTime<Utc>,
 }
@@ -383,6 +401,11 @@ struct AuthorRow {
 #[derive(sqlx::FromRow)]
 struct BlurRow {
     is_blurred: bool,
+}
+
+#[derive(sqlx::FromRow)]
+struct AnonymousRow {
+    is_anonymous: bool,
 }
 
 #[derive(sqlx::FromRow)]

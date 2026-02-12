@@ -81,6 +81,17 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                             .map(|t| t == &token)
                             .unwrap_or(false);
 
+                        // For anonymous boards, discard the participant name
+                        let board_anonymous = db::get_board_anonymous(&state.db, &board_id)
+                            .await
+                            .unwrap_or(Some(false))
+                            .unwrap_or(false);
+                        let effective_name = if board_anonymous {
+                            String::new()
+                        } else {
+                            participant_name
+                        };
+
                         // Add participant to in-memory map
                         {
                             let mut participants = state.participants.write().await;
@@ -89,7 +100,7 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                                 .or_default()
                                 .push(Participant {
                                     id: participant_id.clone(),
-                                    name: participant_name.clone(),
+                                    name: effective_name.clone(),
                                 });
                         }
 
@@ -107,7 +118,7 @@ async fn handle_socket(socket: WebSocket, board_id: String, state: AppState) {
                         // Broadcast updated state (new participant count)
                         broadcast_board_state(&state, &board_id).await;
 
-                        break (participant_id, participant_name, is_facilitator);
+                        break (participant_id, effective_name, is_facilitator);
                     }
                     Ok(_) => {
                         let _ = sender

@@ -7,6 +7,8 @@ import { Column } from "../components/board/Column";
 import { COLUMN_COLORS } from "../lib/types";
 import { AppShell } from "../components/layout/AppShell";
 
+const BASE = import.meta.env.VITE_API_URL ?? "";
+
 export default function Board() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -18,6 +20,27 @@ export default function Board() {
     return sessionStorage.getItem(`participant_name_${id}`) ?? "";
   });
   const [nameInput, setNameInput] = useState("");
+  const [checkingAnonymous, setCheckingAnonymous] = useState(!participantName);
+
+  // For shared-link joins, check if board is anonymous before showing name prompt
+  useEffect(() => {
+    if (participantName || !id) return;
+    let cancelled = false;
+    fetch(`${BASE}/api/boards/${id}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.is_anonymous) {
+          sessionStorage.setItem(`participant_name_${id}`, "__anonymous__");
+          setParticipantName("__anonymous__");
+        }
+        setCheckingAnonymous(false);
+      })
+      .catch(() => {
+        if (!cancelled) setCheckingAnonymous(false);
+      });
+    return () => { cancelled = true; };
+  }, [id, participantName]);
 
   const { send } = useWebSocket(id ?? "", participantName);
 
@@ -32,7 +55,16 @@ export default function Board() {
     return null;
   }
 
-  // Name entry for participants who joined via shared link
+  // While checking if board is anonymous, show loading
+  if (checkingAnonymous) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-muted">Loading...</p>
+      </div>
+    );
+  }
+
+  // Name entry for participants who joined via shared link (non-anonymous boards)
   if (!participantName) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">

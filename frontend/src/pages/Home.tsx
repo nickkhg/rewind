@@ -10,6 +10,7 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [name, setName] = useState("");
+  const [isAnonymous, setIsAnonymous] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,14 +35,23 @@ export default function Home() {
     const trimmedCols = columns.map((c) => c.trim()).filter(Boolean);
 
     if (!trimmedTitle) return setError("Board title is required");
-    if (!trimmedName) return setError("Your name is required");
+    if (!isAnonymous && !trimmedName) return setError("Your name is required");
     if (trimmedCols.length === 0) return setError("At least one column is required");
 
     setLoading(true);
     try {
-      const res = await createBoard({ title: trimmedTitle, columns: trimmedCols });
+      const res = await createBoard({
+        title: trimmedTitle,
+        columns: trimmedCols,
+        is_anonymous: isAnonymous || undefined,
+      });
       sessionStorage.setItem(`facilitator_${res.board.id}`, res.facilitator_token);
-      sessionStorage.setItem(`participant_name_${res.board.id}`, trimmedName);
+      if (isAnonymous) {
+        // Store a sentinel so Board.tsx skips the name prompt
+        sessionStorage.setItem(`participant_name_${res.board.id}`, "__anonymous__");
+      } else {
+        sessionStorage.setItem(`participant_name_${res.board.id}`, trimmedName);
+      }
       navigate(`/board/${res.board.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create board");
@@ -62,19 +72,21 @@ export default function Home() {
           onSubmit={handleSubmit}
           className="bg-surface rounded-2xl shadow-sm border border-border p-8 space-y-6"
         >
-          <div>
-            <label htmlFor="name" className="block text-sm font-medium mb-1.5">
-              Your name
-            </label>
-            <input
-              id="name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Alex"
-              className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
-            />
-          </div>
+          {!isAnonymous && (
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium mb-1.5">
+                Your name
+              </label>
+              <input
+                id="name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Alex"
+                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
+              />
+            </div>
+          )}
 
           <div>
             <label htmlFor="title" className="block text-sm font-medium mb-1.5">
@@ -125,6 +137,17 @@ export default function Home() {
               </button>
             )}
           </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isAnonymous}
+              onChange={(e) => setIsAnonymous(e.target.checked)}
+              className="rounded border-border text-accent focus:ring-accent/40"
+            />
+            <span className="text-sm font-medium">Anonymous board</span>
+            <span className="text-xs text-muted">— no names shown</span>
+          </label>
 
           {error && (
             <p className="text-sm text-red-600">{error}</p>

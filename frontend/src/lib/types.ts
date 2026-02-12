@@ -3,6 +3,7 @@ export interface Board {
   title: string;
   columns: Column[];
   is_blurred: boolean;
+  is_anonymous: boolean;
   created_at: string;
   participant_count: number;
 }
@@ -25,6 +26,7 @@ export interface Ticket {
 export interface CreateBoardRequest {
   title: string;
   columns: string[];
+  is_anonymous?: boolean;
 }
 
 export interface CreateBoardResponse {

@@ -8,6 +8,7 @@ pub struct Board {
     pub title: String,
     pub columns: Vec<Column>,
     pub is_blurred: bool,
+    pub is_anonymous: bool,
     pub created_at: DateTime<Utc>,
     pub facilitator_token: String,
     pub participants: Vec<Participant>,
@@ -43,6 +44,7 @@ pub struct BoardView {
     pub title: String,
     pub columns: Vec<Column>,
     pub is_blurred: bool,
+    pub is_anonymous: bool,
     pub created_at: DateTime<Utc>,
     pub participant_count: usize,
 }
@@ -54,6 +56,7 @@ impl Board {
             title: self.title.clone(),
             columns: self.columns.clone(),
             is_blurred: self.is_blurred,
+            is_anonymous: self.is_anonymous,
             created_at: self.created_at,
             participant_count: count,
         }
@@ -64,6 +67,8 @@ impl Board {
 pub struct CreateBoardRequest {
     pub title: String,
     pub columns: Vec<String>,
+    #[serde(default)]
+    pub is_anonymous: bool,
 }
 
 #[derive(Debug, Serialize)]
