@@ -5,5 +5,9 @@
     "dev:frontend": "pnpm --filter frontend dev",
     "dev:backend": "cd backend && cargo run",
     "build:frontend": "pnpm --filter frontend build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "playwright": "^1.58.2"
   }
 }
