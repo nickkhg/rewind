@@ -1,0 +1,40 @@
+{
+  "productName": "Rewind",
+  "version": "0.1.0",
+  "identifier": "com.rewind.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev:frontend",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm build:frontend",
+    "frontendDist": "../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Rewind",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["rewind"]
+      }
+    }
+  }
+}

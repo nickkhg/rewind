@@ -1,0 +1,9 @@
+{
+  "name": "rewind",
+  "private": true,
+  "scripts": {
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "cd backend && cargo run",
+    "build:frontend": "pnpm --filter frontend build"
+  }
+}

@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+target/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Tauri
+src-tauri/target/
+
+# Logs
+*.log
+
+# Claude skills/agents (user-level)
+.agents/
+.claude/
+
+# Playwright MCP
+.playwright-mcp/
