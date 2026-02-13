@@ -358,5 +358,40 @@ async fn handle_message(
                 }
             }
         }
+
+        ClientMessage::MergeTickets {
+            source_ticket_id,
+            target_ticket_id,
+        } => {
+            match db::merge_tickets(&state.db, &source_ticket_id, &target_ticket_id).await {
+                Ok(Some(snapshot)) => {
+                    let mut merges = state.last_merge.write().await;
+                    merges.insert(board_id.to_string(), snapshot);
+                    true
+                }
+                Ok(None) => false,
+                Err(e) => {
+                    warn!("Failed to merge tickets: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::UndoMerge => {
+            let snapshot = {
+                let mut merges = state.last_merge.write().await;
+                merges.remove(board_id)
+            };
+            match snapshot {
+                Some(snap) => match db::undo_merge(&state.db, &snap).await {
+                    Ok(()) => true,
+                    Err(e) => {
+                        warn!("Failed to undo merge: {e}");
+                        false
+                    }
+                },
+                None => false,
+            }
+        }
     }
 }

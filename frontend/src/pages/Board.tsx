@@ -1,10 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import { useBoardStore } from "../store/boardStore";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { BoardHeader } from "../components/board/BoardHeader";
 import { Column } from "../components/board/Column";
+import { TicketCard } from "../components/board/Ticket";
+import { MergeUndoToast } from "../components/board/MergeUndoToast";
 import { COLUMN_COLORS } from "../lib/types";
+import type { Ticket } from "../lib/types";
 import { AppShell } from "../components/layout/AppShell";
 
 const BASE = import.meta.env.VITE_API_URL ?? "";
@@ -14,6 +26,7 @@ export default function Board() {
   const navigate = useNavigate();
   const board = useBoardStore((s) => s.board);
   const reset = useBoardStore((s) => s.reset);
+  const setPendingUndo = useBoardStore((s) => s.setPendingUndo);
 
   // Check for participant name — prompt if missing (joined via shared link)
   const [participantName, setParticipantName] = useState(() => {
@@ -49,6 +62,54 @@ export default function Board() {
       reset();
     };
   }, [reset]);
+
+  // Drag-and-drop for ticket merging
+  const [activeTicket, setActiveTicket] = useState<{ ticket: Ticket; color: string } | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const { ticket, columnId } = event.active.data.current as {
+        ticket: Ticket;
+        columnId: string;
+      };
+      // Find the color for this column
+      const colIndex = board?.columns.findIndex((c) => c.id === columnId) ?? 0;
+      const color = COLUMN_COLORS[colIndex % COLUMN_COLORS.length];
+      setActiveTicket({ ticket, color });
+    },
+    [board]
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveTicket(null);
+      const { over, active } = event;
+      if (!over) return;
+
+      const overData = over.data.current as { type: string; ticketId: string; columnId: string } | undefined;
+      const activeData = active.data.current as { type: string; ticket: Ticket; columnId: string } | undefined;
+
+      if (
+        overData?.type === "merge" &&
+        activeData?.type === "ticket" &&
+        activeData.ticket.id !== overData.ticketId &&
+        activeData.columnId === overData.columnId
+      ) {
+        send({
+          type: "MergeTickets",
+          payload: {
+            source_ticket_id: activeData.ticket.id,
+            target_ticket_id: overData.ticketId,
+          },
+        });
+        setPendingUndo();
+      }
+    },
+    [send, setPendingUndo]
+  );
 
   if (!id) {
     navigate("/");
@@ -115,20 +176,38 @@ export default function Board() {
   return (
     <AppShell>
       <BoardHeader send={send} />
-      <main className="flex-1 overflow-x-auto">
-        <div className="max-w-[1400px] mx-auto px-4 py-6">
-          <div className="flex gap-6">
-            {board.columns.map((col, i) => (
-              <Column
-                key={col.id}
-                column={col}
-                color={COLUMN_COLORS[i % COLUMN_COLORS.length]}
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <main className="flex-1 overflow-x-auto">
+          <div className="max-w-[1400px] mx-auto px-4 py-6">
+            <div className="flex gap-6">
+              {board.columns.map((col, i) => (
+                <Column
+                  key={col.id}
+                  column={col}
+                  color={COLUMN_COLORS[i % COLUMN_COLORS.length]}
+                  send={send}
+                />
+              ))}
+            </div>
+          </div>
+        </main>
+        <DragOverlay>
+          {activeTicket ? (
+            <div style={{ transform: "rotate(2deg)", opacity: 0.85, width: 320 }}>
+              <TicketCard
+                ticket={activeTicket.ticket}
+                color={activeTicket.color}
                 send={send}
               />
-            ))}
-          </div>
-        </div>
-      </main>
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+      <MergeUndoToast send={send} />
     </AppShell>
   );
 }

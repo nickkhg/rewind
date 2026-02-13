@@ -41,7 +41,9 @@ export type ClientMessage =
   | { type: "RemoveTicket"; payload: { ticket_id: string } }
   | { type: "EditTicket"; payload: { ticket_id: string; content: string } }
   | { type: "ToggleVote"; payload: { ticket_id: string } }
-  | { type: "ToggleBlur" };
+  | { type: "ToggleBlur" }
+  | { type: "MergeTickets"; payload: { source_ticket_id: string; target_ticket_id: string } }
+  | { type: "UndoMerge" };
 
 export type ServerMessage =
   | { type: "BoardState"; payload: { board: Board } }

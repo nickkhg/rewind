@@ -23,6 +23,11 @@ pub enum ClientMessage {
         ticket_id: String,
     },
     ToggleBlur,
+    MergeTickets {
+        source_ticket_id: String,
+        target_ticket_id: String,
+    },
+    UndoMerge,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -1,6 +1,6 @@
 import { useBoardStore } from "../../store/boardStore";
 import { sortTickets } from "../../utils/sort";
-import { TicketCard } from "./Ticket";
+import { DraggableTicket } from "./DraggableTicket";
 import { AddTicketForm } from "./AddTicketForm";
 import type { Column as ColumnType, ClientMessage } from "../../lib/types";
 
@@ -27,7 +27,13 @@ export function Column({ column, color, send }: ColumnProps) {
 
       <div className="space-y-2.5">
         {sorted.map((ticket) => (
-          <TicketCard key={ticket.id} ticket={ticket} color={color} send={send} />
+          <DraggableTicket
+            key={ticket.id}
+            ticket={ticket}
+            color={color}
+            columnId={column.id}
+            send={send}
+          />
         ))}
       </div>
 

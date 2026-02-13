@@ -3,6 +3,7 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 
 use crate::models::{Board, Column, Ticket};
+use crate::state::MergeSnapshot;
 
 // --- Board ---
 
@@ -386,6 +387,124 @@ pub async fn toggle_vote(
             .execute(pool)
             .await?;
     }
+    Ok(())
+}
+
+// --- Merge ---
+
+pub async fn merge_tickets(
+    pool: &PgPool,
+    source_id: &str,
+    target_id: &str,
+) -> Result<Option<MergeSnapshot>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Fetch both tickets
+    let source = sqlx::query_as::<_, TicketRow>(
+        "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE id = $1",
+    )
+    .bind(source_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let target = sqlx::query_as::<_, TicketRow>(
+        "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE id = $1",
+    )
+    .bind(target_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let (source, target) = match (source, target) {
+        (Some(s), Some(t)) => (s, t),
+        _ => return Ok(None),
+    };
+
+    // Must be in the same column
+    if source.column_id != target.column_id {
+        return Ok(None);
+    }
+
+    // Fetch source votes
+    let source_votes: Vec<VoteRow> =
+        sqlx::query_as::<_, VoteRow>("SELECT ticket_id, participant_id FROM votes WHERE ticket_id = $1")
+            .bind(source_id)
+            .fetch_all(&mut *tx)
+            .await?;
+    let source_vote_ids: Vec<String> = source_votes.iter().map(|v| v.participant_id.clone()).collect();
+
+    // Combined content
+    let combined = format!("{}\n---\n{}", target.content, source.content);
+
+    // Update target content
+    sqlx::query("UPDATE tickets SET content = $1 WHERE id = $2")
+        .bind(&combined)
+        .bind(target_id)
+        .execute(&mut *tx)
+        .await?;
+
+    // Copy source votes to target (union — skip duplicates)
+    for voter_id in &source_vote_ids {
+        sqlx::query("INSERT INTO votes (ticket_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(target_id)
+            .bind(voter_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // Delete source ticket (cascade deletes its votes)
+    sqlx::query("DELETE FROM tickets WHERE id = $1")
+        .bind(source_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+
+    Ok(Some(MergeSnapshot {
+        source_id: source.id,
+        source_column_id: source.column_id,
+        source_content: source.content,
+        source_author_id: source.author_id,
+        source_author_name: source.author_name,
+        source_created_at: source.created_at,
+        source_votes: source_vote_ids,
+        target_id: target.id,
+        target_original_content: target.content,
+    }))
+}
+
+pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Restore target's original content
+    sqlx::query("UPDATE tickets SET content = $1 WHERE id = $2")
+        .bind(&snapshot.target_original_content)
+        .bind(&snapshot.target_id)
+        .execute(&mut *tx)
+        .await?;
+
+    // Re-create source ticket
+    sqlx::query(
+        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(&snapshot.source_id)
+    .bind(&snapshot.source_column_id)
+    .bind(&snapshot.source_content)
+    .bind(&snapshot.source_author_id)
+    .bind(&snapshot.source_author_name)
+    .bind(snapshot.source_created_at)
+    .execute(&mut *tx)
+    .await?;
+
+    // Re-create source votes
+    for voter_id in &snapshot.source_votes {
+        sqlx::query("INSERT INTO votes (ticket_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(&snapshot.source_id)
+            .bind(voter_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
     Ok(())
 }
 

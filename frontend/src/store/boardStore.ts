@@ -7,11 +7,14 @@ interface BoardState {
   isFacilitator: boolean;
   isConnected: boolean;
   sortMode: SortMode;
+  pendingUndo: boolean;
 
   setBoard: (board: Board) => void;
   setAuth: (participantId: string, isFacilitator: boolean) => void;
   setConnected: (connected: boolean) => void;
   setSortMode: (mode: SortMode) => void;
+  setPendingUndo: () => void;
+  clearPendingUndo: () => void;
   reset: () => void;
 }
 
@@ -21,11 +24,14 @@ export const useBoardStore = create<BoardState>((set) => ({
   isFacilitator: false,
   isConnected: false,
   sortMode: "newest",
+  pendingUndo: false,
 
   setBoard: (board) => set({ board }),
   setAuth: (participantId, isFacilitator) => set({ participantId, isFacilitator }),
   setConnected: (connected) => set({ isConnected: connected }),
   setSortMode: (mode) => set({ sortMode: mode }),
+  setPendingUndo: () => set({ pendingUndo: true }),
+  clearPendingUndo: () => set({ pendingUndo: false }),
   reset: () =>
     set({
       board: null,
@@ -33,5 +39,6 @@ export const useBoardStore = create<BoardState>((set) => ({
       isFacilitator: false,
       isConnected: false,
       sortMode: "newest",
+      pendingUndo: false,
     }),
 }));
