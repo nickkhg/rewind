@@ -419,11 +419,6 @@ pub async fn merge_tickets(
         _ => return Ok(None),
     };
 
-    // Must be in the same column
-    if source.column_id != target.column_id {
-        return Ok(None);
-    }
-
     // Fetch source votes
     let source_votes: Vec<VoteRow> =
         sqlx::query_as::<_, VoteRow>("SELECT ticket_id, participant_id FROM votes WHERE ticket_id = $1")
@@ -506,6 +501,67 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
 
     tx.commit().await?;
     Ok(())
+}
+
+// --- Split ---
+
+pub async fn split_ticket(
+    pool: &PgPool,
+    ticket_id: &str,
+    segment_index: usize,
+    new_ticket_id: &str,
+    participant_id: &str,
+    participant_name: &str,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let ticket = sqlx::query_as::<_, TicketRow>(
+        "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(ticket) = ticket else {
+        return Ok(false);
+    };
+
+    let segments: Vec<&str> = ticket.content.split("\n---\n").collect();
+    if segments.len() < 2 || segment_index >= segments.len() {
+        return Ok(false);
+    }
+
+    let extracted = segments[segment_index].to_string();
+    let remaining: Vec<&str> = segments
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| *i != segment_index)
+        .map(|(_, s)| s)
+        .collect();
+    let updated_content = remaining.join("\n---\n");
+
+    // Update original ticket
+    sqlx::query("UPDATE tickets SET content = $1 WHERE id = $2")
+        .bind(&updated_content)
+        .bind(ticket_id)
+        .execute(&mut *tx)
+        .await?;
+
+    // Insert new ticket with the extracted segment
+    sqlx::query(
+        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(new_ticket_id)
+    .bind(&ticket.column_id)
+    .bind(&extracted)
+    .bind(participant_id)
+    .bind(participant_name)
+    .bind(Utc::now())
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(true)
 }
 
 // --- Blur ---

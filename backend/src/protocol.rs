@@ -29,6 +29,10 @@ pub enum ClientMessage {
         target_ticket_id: String,
     },
     UndoMerge,
+    SplitTicket {
+        ticket_id: String,
+        segment_index: usize,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

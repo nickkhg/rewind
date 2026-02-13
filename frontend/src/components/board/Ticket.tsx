@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useBoardStore } from "../../store/boardStore";
 import { VoteButton } from "./VoteButton";
 import type { Ticket as TicketType, ClientMessage } from "../../lib/types";
@@ -27,6 +27,27 @@ export function TicketCard({ ticket, color, send }: TicketProps) {
 
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(ticket.content);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const splitRef = useRef<HTMLDivElement>(null);
+
+  const segments = ticket.content.split("\n---\n");
+  const isMerged = segments.length > 1;
+
+  useEffect(() => {
+    if (!splitOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (splitRef.current && !splitRef.current.contains(e.target as Node)) {
+        setSplitOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [splitOpen]);
+
+  function handleSplit(index: number) {
+    send({ type: "SplitTicket", payload: { ticket_id: ticket.id, segment_index: index } });
+    setSplitOpen(false);
+  }
 
   function handleSaveEdit() {
     const trimmed = editContent.trim();
@@ -101,9 +122,33 @@ export function TicketCard({ ticket, color, send }: TicketProps) {
             hasVoted={hasVoted}
             send={send}
           />
-          {/* Edit/Delete shown on hover for author or facilitator */}
+          {/* Edit/Delete/Split shown on hover for author or facilitator */}
           {(isAuthor || isFacilitator) && !editing && (
             <div className="hidden group-hover:flex items-center gap-1">
+              {isMerged && (
+                <div className="relative" ref={splitRef}>
+                  <button
+                    onClick={() => setSplitOpen((v) => !v)}
+                    className="text-xs text-muted hover:text-ink"
+                  >
+                    Split
+                  </button>
+                  {splitOpen && (
+                    <div className="absolute bottom-full mb-1 left-0 z-50 bg-surface border border-border rounded shadow-lg py-1 min-w-[180px] max-w-[260px]">
+                      {segments.map((seg, i) => (
+                        <button
+                          key={i}
+                          onClick={() => handleSplit(i)}
+                          className="block w-full text-left text-xs text-ink px-3 py-1.5 hover:bg-accent/10 truncate"
+                          title={seg.trim()}
+                        >
+                          {seg.trim().length > 60 ? seg.trim().slice(0, 60) + "..." : seg.trim()}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {isAuthor && (
                 <button
                   onClick={() => {

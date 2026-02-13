@@ -43,7 +43,8 @@ export type ClientMessage =
   | { type: "ToggleVote"; payload: { ticket_id: string } }
   | { type: "ToggleBlur" }
   | { type: "MergeTickets"; payload: { source_ticket_id: string; target_ticket_id: string } }
-  | { type: "UndoMerge" };
+  | { type: "UndoMerge" }
+  | { type: "SplitTicket"; payload: { ticket_id: string; segment_index: number } };
 
 export type ServerMessage =
   | { type: "BoardState"; payload: { board: Board } }

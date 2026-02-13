@@ -396,5 +396,35 @@ async fn handle_message(
                 None => false,
             }
         }
+
+        ClientMessage::SplitTicket {
+            ticket_id,
+            segment_index,
+        } => {
+            // Auth: author or facilitator
+            match db::get_ticket_author(&state.db, &ticket_id).await {
+                Ok(Some(author_id)) if author_id == participant_id || is_facilitator => {}
+                _ => return false,
+            }
+
+            let new_ticket_id = nanoid!(8);
+            match db::split_ticket(
+                &state.db,
+                &ticket_id,
+                segment_index,
+                &new_ticket_id,
+                participant_id,
+                participant_name,
+            )
+            .await
+            {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    warn!("Failed to split ticket: {e}");
+                    false
+                }
+            }
+        }
     }
 }
