@@ -1,6 +1,7 @@
 {
   "name": "rewind",
   "private": true,
+  "packageManager": "pnpm@10.15.1",
   "scripts": {
     "dev:frontend": "pnpm --filter frontend dev",
     "dev:backend": "cd backend && cargo run",
