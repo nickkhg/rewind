@@ -6,10 +6,11 @@ interface VoteButtonProps {
   voteCount: number;
   hasVoted: boolean;
   voteLimitReached?: boolean;
+  hideVotes?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function VoteButton({ ticketId, voteCount, hasVoted, voteLimitReached, send }: VoteButtonProps) {
+export function VoteButton({ ticketId, voteCount, hasVoted, voteLimitReached, hideVotes, send }: VoteButtonProps) {
   const [bouncing, setBouncing] = useState(false);
   const disabled = !!(voteLimitReached && !hasVoted);
 
@@ -33,7 +34,7 @@ export function VoteButton({ ticketId, voteCount, hasVoted, voteLimitReached, se
       } ${bouncing ? "animate-vote-bounce" : ""}`}
     >
       <span className="leading-none">&#9650;</span>
-      <span>{voteCount}</span>
+      {!hideVotes && <span>{voteCount}</span>}
     </button>
   );
 }

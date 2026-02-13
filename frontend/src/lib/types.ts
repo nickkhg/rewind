@@ -6,6 +6,7 @@ export interface Board {
   is_anonymous: boolean;
   created_at: string;
   participant_count: number;
+  hide_votes: boolean;
   vote_limit_per_column: number | null;
   timer_end: string | null;
 }
@@ -44,6 +45,7 @@ export type ClientMessage =
   | { type: "EditTicket"; payload: { ticket_id: string; content: string } }
   | { type: "ToggleVote"; payload: { ticket_id: string } }
   | { type: "ToggleBlur" }
+  | { type: "ToggleHideVotes" }
   | { type: "MergeTickets"; payload: { source_ticket_id: string; target_ticket_id: string } }
   | { type: "UndoMerge" }
   | { type: "SplitTicket"; payload: { ticket_id: string; segment_index: number } }

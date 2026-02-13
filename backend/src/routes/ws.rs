@@ -391,6 +391,23 @@ async fn handle_message(
             }
         }
 
+        ClientMessage::ToggleHideVotes => {
+            if !is_facilitator {
+                return false;
+            }
+            let current = match db::get_hide_votes(&state.db, board_id).await {
+                Ok(Some(v)) => v,
+                _ => return false,
+            };
+            match db::set_hide_votes(&state.db, board_id, !current).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to toggle hide votes: {e}");
+                    false
+                }
+            }
+        }
+
         ClientMessage::MergeTickets {
             source_ticket_id,
             target_ticket_id,

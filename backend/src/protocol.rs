@@ -24,6 +24,7 @@ pub enum ClientMessage {
         ticket_id: String,
     },
     ToggleBlur,
+    ToggleHideVotes,
     MergeTickets {
         source_ticket_id: String,
         target_ticket_id: String,

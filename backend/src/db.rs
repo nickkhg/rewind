@@ -59,6 +59,7 @@ pub async fn create_board(
         columns: cols,
         is_blurred: true,
         is_anonymous,
+        hide_votes: false,
         created_at,
         facilitator_token: facilitator_token.to_string(),
         facilitator_id: Some(facilitator_id.to_string()),
@@ -70,7 +71,7 @@ pub async fn create_board(
 
 pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, sqlx::Error> {
     let row = sqlx::query_as::<_, BoardRow>(
-        "SELECT id, title, is_blurred, is_anonymous, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end FROM boards WHERE id = $1",
+        "SELECT id, title, is_blurred, is_anonymous, hide_votes, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end FROM boards WHERE id = $1",
     )
     .bind(board_id)
     .fetch_optional(pool)
@@ -157,6 +158,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         columns,
         is_blurred: board_row.is_blurred,
         is_anonymous: board_row.is_anonymous,
+        hide_votes: board_row.hide_votes,
         created_at: board_row.created_at,
         facilitator_token: board_row.facilitator_token,
         facilitator_id: board_row.facilitator_id,
@@ -568,6 +570,32 @@ pub async fn split_ticket(
     Ok(true)
 }
 
+// --- Hide votes ---
+
+pub async fn get_hide_votes(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Option<bool>, sqlx::Error> {
+    let row = sqlx::query_as::<_, HideVotesRow>("SELECT hide_votes FROM boards WHERE id = $1")
+        .bind(board_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|r| r.hide_votes))
+}
+
+pub async fn set_hide_votes(
+    pool: &PgPool,
+    board_id: &str,
+    hide_votes: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE boards SET hide_votes = $1 WHERE id = $2")
+        .bind(hide_votes)
+        .bind(board_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // --- Blur ---
 
 pub async fn set_blur(
@@ -747,11 +775,17 @@ struct BoardRow {
     title: String,
     is_blurred: bool,
     is_anonymous: bool,
+    hide_votes: bool,
     facilitator_token: String,
     facilitator_id: Option<String>,
     created_at: DateTime<Utc>,
     vote_limit_per_column: Option<i32>,
     timer_end: Option<DateTime<Utc>>,
+}
+
+#[derive(sqlx::FromRow)]
+struct HideVotesRow {
+    hide_votes: bool,
 }
 
 #[derive(sqlx::FromRow)]

@@ -12,6 +12,7 @@ interface FacilitatorMenuProps {
 export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
   const [open, setOpen] = useState(false);
   const isBlurred = useBoardStore((s) => s.board?.is_blurred ?? true);
+  const hideVotes = useBoardStore((s) => s.board?.hide_votes ?? false);
 
   useEffect(() => {
     if (!open) return;
@@ -90,6 +91,30 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
                   {isBlurred
                     ? "Cards are hidden. Authors can still see their own."
                     : "All cards are visible to everyone."}
+                </p>
+              </div>
+
+              <hr className="border-border" />
+
+              {/* Hide Votes Toggle */}
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Vote Visibility</span>
+                  <button
+                    onClick={() => send({ type: "ToggleHideVotes" })}
+                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                      hideVotes
+                        ? "border-accent bg-accent/10 text-accent hover:bg-accent/20"
+                        : "border-border hover:bg-canvas"
+                    }`}
+                  >
+                    {hideVotes ? "Show Votes" : "Hide Votes"}
+                  </button>
+                </div>
+                <p className="text-xs text-muted mt-1">
+                  {hideVotes
+                    ? "Vote counts are hidden. Participants can still vote."
+                    : "Vote counts are visible to everyone."}
                 </p>
               </div>
 

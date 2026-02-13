@@ -122,6 +122,7 @@ export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProp
             voteCount={ticket.votes.length}
             hasVoted={hasVoted}
             voteLimitReached={voteLimitReached}
+            hideVotes={board?.hide_votes}
             send={send}
           />
           {/* Edit/Delete/Split shown on hover for author or facilitator */}

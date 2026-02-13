@@ -14,7 +14,9 @@ export function Column({ column, color, send }: ColumnProps) {
   const sortMode = useBoardStore((s) => s.sortMode);
   const participantId = useBoardStore((s) => s.participantId);
   const voteLimit = useBoardStore((s) => s.board?.vote_limit_per_column ?? null);
-  const sorted = sortTickets(column.tickets, sortMode);
+  const hideVotes = useBoardStore((s) => s.board?.hide_votes ?? false);
+  const effectiveSortMode = hideVotes ? "newest" : sortMode;
+  const sorted = sortTickets(column.tickets, effectiveSortMode);
 
   // Count how many votes the current participant has in this column
   const myVotesInColumn = participantId
@@ -35,7 +37,7 @@ export function Column({ column, color, send }: ColumnProps) {
         />
         <h2 className="font-display font-semibold text-base">{column.name}</h2>
         <span className="text-xs text-muted">{column.tickets.length}</span>
-        {voteLimit !== null && (
+        {voteLimit !== null && !hideVotes && (
           <span className="text-xs text-muted ml-auto">
             {myVotesInColumn}/{voteLimit} votes
           </span>
