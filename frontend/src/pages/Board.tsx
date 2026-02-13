@@ -95,8 +95,7 @@ export default function Board() {
       if (
         overData?.type === "merge" &&
         activeData?.type === "ticket" &&
-        activeData.ticket.id !== overData.ticketId &&
-        activeData.columnId === overData.columnId
+        activeData.ticket.id !== overData.ticketId
       ) {
         send({
           type: "MergeTickets",
