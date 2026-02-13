@@ -55,6 +55,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --filter frontend
 
+      - name: Write App Store Connect API key
+        run: echo "${{ secrets.APPLE_API_KEY_PATH }}" | base64 --decode > /tmp/AuthKey.p8
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -63,7 +66,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          APPLE_API_KEY_PATH: /tmp/AuthKey.p8
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
