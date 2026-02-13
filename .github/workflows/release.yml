@@ -55,10 +55,8 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --filter frontend
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --locked
-
       - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -66,7 +64,6 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
-        run: cargo tauri build
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
