@@ -5,13 +5,16 @@ interface VoteButtonProps {
   ticketId: string;
   voteCount: number;
   hasVoted: boolean;
+  voteLimitReached?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function VoteButton({ ticketId, voteCount, hasVoted, send }: VoteButtonProps) {
+export function VoteButton({ ticketId, voteCount, hasVoted, voteLimitReached, send }: VoteButtonProps) {
   const [bouncing, setBouncing] = useState(false);
+  const disabled = !!(voteLimitReached && !hasVoted);
 
   function handleClick() {
+    if (disabled) return;
     send({ type: "ToggleVote", payload: { ticket_id: ticketId } });
     setBouncing(true);
     setTimeout(() => setBouncing(false), 300);
@@ -20,10 +23,13 @@ export function VoteButton({ ticketId, voteCount, hasVoted, send }: VoteButtonPr
   return (
     <button
       onClick={handleClick}
+      disabled={disabled}
       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
         hasVoted
           ? "bg-accent text-white"
-          : "bg-canvas text-muted hover:text-ink"
+          : disabled
+            ? "bg-canvas text-muted opacity-40 cursor-not-allowed"
+            : "bg-canvas text-muted hover:text-ink"
       } ${bouncing ? "animate-vote-bounce" : ""}`}
     >
       <span className="leading-none">&#9650;</span>

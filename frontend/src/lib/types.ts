@@ -6,6 +6,8 @@ export interface Board {
   is_anonymous: boolean;
   created_at: string;
   participant_count: number;
+  vote_limit_per_column: number | null;
+  timer_end: string | null;
 }
 
 export interface Column {
@@ -44,7 +46,10 @@ export type ClientMessage =
   | { type: "ToggleBlur" }
   | { type: "MergeTickets"; payload: { source_ticket_id: string; target_ticket_id: string } }
   | { type: "UndoMerge" }
-  | { type: "SplitTicket"; payload: { ticket_id: string; segment_index: number } };
+  | { type: "SplitTicket"; payload: { ticket_id: string; segment_index: number } }
+  | { type: "SetVoteLimit"; payload: { limit: number | null } }
+  | { type: "StartTimer"; payload: { duration_secs: number } }
+  | { type: "StopTimer" };
 
 export type ServerMessage =
   | { type: "BoardState"; payload: { board: Board } }

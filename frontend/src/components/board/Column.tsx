@@ -12,7 +12,19 @@ interface ColumnProps {
 
 export function Column({ column, color, send }: ColumnProps) {
   const sortMode = useBoardStore((s) => s.sortMode);
+  const participantId = useBoardStore((s) => s.participantId);
+  const voteLimit = useBoardStore((s) => s.board?.vote_limit_per_column ?? null);
   const sorted = sortTickets(column.tickets, sortMode);
+
+  // Count how many votes the current participant has in this column
+  const myVotesInColumn = participantId
+    ? column.tickets.reduce(
+        (count, t) => count + (t.votes.includes(participantId) ? 1 : 0),
+        0,
+      )
+    : 0;
+
+  const voteLimitReached = voteLimit !== null && myVotesInColumn >= voteLimit;
 
   return (
     <div className="flex-1 min-w-[280px] max-w-[400px]">
@@ -23,6 +35,11 @@ export function Column({ column, color, send }: ColumnProps) {
         />
         <h2 className="font-display font-semibold text-base">{column.name}</h2>
         <span className="text-xs text-muted">{column.tickets.length}</span>
+        {voteLimit !== null && (
+          <span className="text-xs text-muted ml-auto">
+            {myVotesInColumn}/{voteLimit} votes
+          </span>
+        )}
       </div>
 
       <div className="space-y-2.5">
@@ -32,6 +49,7 @@ export function Column({ column, color, send }: ColumnProps) {
             ticket={ticket}
             color={color}
             columnId={column.id}
+            voteLimitReached={voteLimitReached}
             send={send}
           />
         ))}

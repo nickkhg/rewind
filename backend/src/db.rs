@@ -63,12 +63,14 @@ pub async fn create_board(
         facilitator_token: facilitator_token.to_string(),
         facilitator_id: Some(facilitator_id.to_string()),
         participants: Vec::new(),
+        vote_limit_per_column: None,
+        timer_end: None,
     })
 }
 
 pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, sqlx::Error> {
     let row = sqlx::query_as::<_, BoardRow>(
-        "SELECT id, title, is_blurred, is_anonymous, facilitator_token, facilitator_id, created_at FROM boards WHERE id = $1",
+        "SELECT id, title, is_blurred, is_anonymous, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end FROM boards WHERE id = $1",
     )
     .bind(board_id)
     .fetch_optional(pool)
@@ -159,6 +161,8 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         facilitator_token: board_row.facilitator_token,
         facilitator_id: board_row.facilitator_id,
         participants: Vec::new(),
+        vote_limit_per_column: board_row.vote_limit_per_column,
+        timer_end: board_row.timer_end,
     }))
 }
 
@@ -649,6 +653,92 @@ pub async fn admin_delete_board(pool: &PgPool, board_id: &str) -> Result<bool, s
     Ok(result.rows_affected() > 0)
 }
 
+// --- Vote Limit ---
+
+pub async fn set_vote_limit(
+    pool: &PgPool,
+    board_id: &str,
+    limit: Option<i32>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE boards SET vote_limit_per_column = $1 WHERE id = $2")
+        .bind(limit)
+        .bind(board_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn get_vote_limit(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Option<i32>, sqlx::Error> {
+    let row = sqlx::query_as::<_, VoteLimitRow>(
+        "SELECT vote_limit_per_column FROM boards WHERE id = $1",
+    )
+    .bind(board_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.and_then(|r| r.vote_limit_per_column))
+}
+
+pub async fn has_vote(
+    pool: &PgPool,
+    ticket_id: &str,
+    participant_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM votes WHERE ticket_id = $1 AND participant_id = $2",
+    )
+    .bind(ticket_id)
+    .bind(participant_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count > 0)
+}
+
+pub async fn get_ticket_column_id(
+    pool: &PgPool,
+    ticket_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query_as::<_, TicketColumnRow>(
+        "SELECT column_id FROM tickets WHERE id = $1",
+    )
+    .bind(ticket_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| r.column_id))
+}
+
+pub async fn count_votes_in_column(
+    pool: &PgPool,
+    column_id: &str,
+    participant_id: &str,
+) -> Result<i64, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM votes v JOIN tickets t ON v.ticket_id = t.id WHERE t.column_id = $1 AND v.participant_id = $2",
+    )
+    .bind(column_id)
+    .bind(participant_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count)
+}
+
+// --- Timer ---
+
+pub async fn set_timer_end(
+    pool: &PgPool,
+    board_id: &str,
+    timer_end: Option<DateTime<Utc>>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE boards SET timer_end = $1 WHERE id = $2")
+        .bind(timer_end)
+        .bind(board_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 // --- Row types for query_as ---
 
 #[derive(sqlx::FromRow)]
@@ -660,6 +750,8 @@ struct BoardRow {
     facilitator_token: String,
     facilitator_id: Option<String>,
     created_at: DateTime<Utc>,
+    vote_limit_per_column: Option<i32>,
+    timer_end: Option<DateTime<Utc>>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -732,6 +824,16 @@ struct TemplateRow {
 #[derive(sqlx::FromRow)]
 struct CountRow {
     count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct VoteLimitRow {
+    vote_limit_per_column: Option<i32>,
+}
+
+#[derive(sqlx::FromRow)]
+struct TicketColumnRow {
+    column_id: String,
 }
 
 #[derive(sqlx::FromRow, Debug)]

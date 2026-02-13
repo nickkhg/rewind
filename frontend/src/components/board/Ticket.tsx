@@ -6,6 +6,7 @@ import type { Ticket as TicketType, ClientMessage } from "../../lib/types";
 interface TicketProps {
   ticket: TicketType;
   color: string;
+  voteLimitReached?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
@@ -18,7 +19,7 @@ function seededRotation(id: string): number {
   return ((hash % 200) / 100) - 1; // -1 to 1 degrees
 }
 
-export function TicketCard({ ticket, color, send }: TicketProps) {
+export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProps) {
   const { participantId, isFacilitator, board } = useBoardStore();
   const isAuthor = ticket.author_id === participantId;
   const isBlurred = board?.is_blurred && !isAuthor;
@@ -120,6 +121,7 @@ export function TicketCard({ ticket, color, send }: TicketProps) {
             ticketId={ticket.id}
             voteCount={ticket.votes.length}
             hasVoted={hasVoted}
+            voteLimitReached={voteLimitReached}
             send={send}
           />
           {/* Edit/Delete/Split shown on hover for author or facilitator */}

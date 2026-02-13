@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Logo } from "../layout/Logo";
 import { useBoardStore } from "../../store/boardStore";
-import { BlurToggle } from "./BlurToggle";
+import { FacilitatorMenu } from "./FacilitatorMenu";
+import { TimerDisplay } from "./TimerDisplay";
 import { SortControls } from "./SortControls";
 import type { ClientMessage } from "../../lib/types";
 
@@ -37,7 +38,8 @@ export function BoardHeader({ send }: BoardHeaderProps) {
 
         <div className="flex items-center gap-3 shrink-0">
           <SortControls />
-          {isFacilitator && <BlurToggle send={send} />}
+          <TimerDisplay />
+          {isFacilitator && <FacilitatorMenu send={send} />}
           <button
             onClick={handleCopy}
             className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-canvas transition-colors"

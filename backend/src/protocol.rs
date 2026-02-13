@@ -33,6 +33,13 @@ pub enum ClientMessage {
         ticket_id: String,
         segment_index: usize,
     },
+    SetVoteLimit {
+        limit: Option<i32>,
+    },
+    StartTimer {
+        duration_secs: u32,
+    },
+    StopTimer,
 }
 
 #[derive(Debug, Clone, Serialize)]

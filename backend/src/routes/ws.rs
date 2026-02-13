@@ -336,6 +336,35 @@ async fn handle_message(
         }
 
         ClientMessage::ToggleVote { ticket_id } => {
+            // Check vote limit before adding a vote
+            let already_voted = match db::has_vote(&state.db, &ticket_id, participant_id).await {
+                Ok(v) => v,
+                Err(e) => {
+                    warn!("Failed to check vote: {e}");
+                    return false;
+                }
+            };
+
+            if !already_voted {
+                // This would be an add — check the limit
+                if let Ok(Some(limit)) = db::get_vote_limit(&state.db, board_id).await {
+                    let column_id = match db::get_ticket_column_id(&state.db, &ticket_id).await {
+                        Ok(Some(cid)) => cid,
+                        _ => return false,
+                    };
+                    let count = match db::count_votes_in_column(&state.db, &column_id, participant_id).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            warn!("Failed to count votes: {e}");
+                            return false;
+                        }
+                    };
+                    if count >= limit as i64 {
+                        return false; // At limit, reject
+                    }
+                }
+            }
+
             match db::toggle_vote(&state.db, &ticket_id, participant_id).await {
                 Ok(()) => true,
                 Err(e) => {
@@ -422,6 +451,55 @@ async fn handle_message(
                 Ok(false) => false,
                 Err(e) => {
                     warn!("Failed to split ticket: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::SetVoteLimit { limit } => {
+            if !is_facilitator {
+                return false;
+            }
+            // Validate: must be >= 1 or None
+            if let Some(l) = limit {
+                if l < 1 {
+                    return false;
+                }
+            }
+            match db::set_vote_limit(&state.db, board_id, limit).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to set vote limit: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::StartTimer { duration_secs } => {
+            if !is_facilitator {
+                return false;
+            }
+            if !(1..=3600).contains(&duration_secs) {
+                return false;
+            }
+            let end = Utc::now() + chrono::Duration::seconds(duration_secs as i64);
+            match db::set_timer_end(&state.db, board_id, Some(end)).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to start timer: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::StopTimer => {
+            if !is_facilitator {
+                return false;
+            }
+            match db::set_timer_end(&state.db, board_id, None).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to stop timer: {e}");
                     false
                 }
             }

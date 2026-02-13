@@ -13,6 +13,8 @@ pub struct Board {
     pub facilitator_token: String,
     pub facilitator_id: Option<String>,
     pub participants: Vec<Participant>,
+    pub vote_limit_per_column: Option<i32>,
+    pub timer_end: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +50,8 @@ pub struct BoardView {
     pub is_anonymous: bool,
     pub created_at: DateTime<Utc>,
     pub participant_count: usize,
+    pub vote_limit_per_column: Option<i32>,
+    pub timer_end: Option<DateTime<Utc>>,
 }
 
 impl Board {
@@ -60,6 +64,8 @@ impl Board {
             is_anonymous: self.is_anonymous,
             created_at: self.created_at,
             participant_count: count,
+            vote_limit_per_column: self.vote_limit_per_column,
+            timer_end: self.timer_end,
         }
     }
 }
