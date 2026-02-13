@@ -85,6 +85,17 @@ Open http://localhost:5173 to use the app.
 cargo tauri dev
 ```
 
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string (e.g. `postgres://user:pass@localhost:5432/rewind`) |
+| `PORT` | No | `3001` | Port the backend listens on |
+| `STATIC_DIR` | No | — | Path to built frontend assets. When set, the backend serves them and handles SPA routing |
+| `ADMIN_TOKEN_HASH` | No | — | Argon2id hash for admin access (see [Admin Interface](#admin-interface)). If omitted, admin routes return 404 |
+| `VITE_API_URL` | No | — | Frontend override for backend URL (only needed if the frontend is hosted separately from the backend) |
+| `RUST_LOG` | No | `info` | Log level filter (e.g. `debug`, `rewind_backend=debug`) |
+
 ### Production Build
 
 ```bash
@@ -92,6 +103,105 @@ cd frontend && pnpm build
 cd ../backend && cargo build --release
 cargo tauri build  # for macOS .app bundle
 ```
+
+## Deployment
+
+### Option 1: Docker Compose (recommended)
+
+The simplest way to run Rewind. This starts PostgreSQL and the app together:
+
+```bash
+docker compose up -d
+```
+
+The app is available at `http://localhost:3001`. The Compose file includes a health check on the database — the app waits for it before starting.
+
+To customize, copy the environment block from `docker-compose.yml` or use an `.env` file:
+
+```env
+DATABASE_URL=postgres://rewind:rewind@db:5432/rewind
+ADMIN_TOKEN_HASH=$argon2id$v=19$m=19456,t=2,p=1$SALT$HASH
+```
+
+> **Note:** If setting `ADMIN_TOKEN_HASH` directly in `docker-compose.yml`, double all `$` signs to escape YAML variable interpolation (e.g. `$$argon2id$$v=19$$...`). Using an `env_file:` avoids this.
+
+### Option 2: Docker image only
+
+Pull the pre-built image from GitHub Container Registry (published on each tagged release):
+
+```bash
+docker pull ghcr.io/<owner>/rewind-readme:latest
+```
+
+Run it against your own PostgreSQL instance:
+
+```bash
+docker run -d -p 3001:3001 \
+  -e DATABASE_URL=postgres://user:pass@host:5432/rewind \
+  -e ADMIN_TOKEN_HASH='$argon2id$...' \
+  ghcr.io/<owner>/rewind-readme:latest
+```
+
+The image bundles both the backend binary and the frontend static assets — no separate web server needed.
+
+### Option 3: Standalone binary + static files
+
+Each GitHub release includes:
+
+- **`rewind-backend`** — statically-linked Linux binary (x86_64 musl)
+- **`frontend-dist.tar.gz`** — pre-built frontend assets
+
+Deploy them together:
+
+```bash
+# Extract frontend assets
+mkdir -p /srv/rewind/static
+tar -xzf frontend-dist.tar.gz -C /srv/rewind/static
+
+# Run the server
+DATABASE_URL=postgres://user:pass@localhost:5432/rewind \
+STATIC_DIR=/srv/rewind/static \
+PORT=3001 \
+./rewind-backend
+```
+
+The backend serves the frontend at the same port and handles SPA fallback routing — no Nginx or reverse proxy required for basic setups.
+
+### Option 4: Backend only (API server)
+
+If you host the frontend separately (e.g. on a CDN or different server), run the backend without `STATIC_DIR`:
+
+```bash
+DATABASE_URL=postgres://user:pass@localhost:5432/rewind \
+PORT=3001 \
+./rewind-backend
+```
+
+Then build and deploy the frontend pointing at the backend:
+
+```bash
+cd frontend
+VITE_API_URL=https://api.example.com pnpm build
+```
+
+The resulting `dist/` directory can be served by any static file host. WebSocket connections go to the same `VITE_API_URL` origin.
+
+### Database
+
+Rewind requires PostgreSQL (tested with 15–17). Migrations run automatically on startup — no manual schema setup needed. The backend creates all tables, indexes, and seed data (default templates) on first launch.
+
+### CI/CD
+
+The GitHub Actions workflow (`.github/workflows/release.yml`) builds all artifacts on a tagged push (`v*`):
+
+| Artifact | Description |
+|----------|-------------|
+| macOS DMG | Signed & notarized Tauri desktop app |
+| Linux binary | Static musl binary for `x86_64` |
+| Frontend tarball | Pre-built Vite output |
+| Docker image | Multi-stage image pushed to `ghcr.io` |
+
+To create a release: `git tag v1.1.0 && git push --tags`
 
 ## Admin Interface
 
