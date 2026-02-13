@@ -130,7 +130,7 @@ ADMIN_TOKEN_HASH=$argon2id$v=19$m=19456,t=2,p=1$SALT$HASH
 Pull the pre-built image from GitHub Container Registry (published on each tagged release):
 
 ```bash
-docker pull ghcr.io/<owner>/rewind-readme:latest
+docker pull ghcr.io/nickkhg/rewind:latest
 ```
 
 Run it against your own PostgreSQL instance:
@@ -139,7 +139,7 @@ Run it against your own PostgreSQL instance:
 docker run -d -p 3001:3001 \
   -e DATABASE_URL=postgres://user:pass@host:5432/rewind \
   -e ADMIN_TOKEN_HASH='$argon2id$...' \
-  ghcr.io/<owner>/rewind-readme:latest
+  ghcr.io/nickkhg/rewind:latest
 ```
 
 The image bundles both the backend binary and the frontend static assets — no separate web server needed.
