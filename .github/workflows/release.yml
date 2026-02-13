@@ -184,10 +184,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download DMG
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          name: macos-dmg
+          path: artifacts/macos-dmg
+
+      - name: Download server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: server-binary
+          path: artifacts/server-binary
+
+      - name: Download frontend assets
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: artifacts/frontend-dist
 
       - name: Prepare release assets
         run: |
