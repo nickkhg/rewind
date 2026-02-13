@@ -7,6 +7,7 @@ pub enum ClientMessage {
     Join {
         participant_name: String,
         facilitator_token: Option<String>,
+        participant_id: Option<String>,
     },
     AddTicket {
         column_id: String,

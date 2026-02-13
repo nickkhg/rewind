@@ -36,7 +36,7 @@ export interface CreateBoardResponse {
 
 // WebSocket protocol
 export type ClientMessage =
-  | { type: "Join"; payload: { participant_name: string; facilitator_token?: string } }
+  | { type: "Join"; payload: { participant_name: string; facilitator_token?: string; participant_id?: string } }
   | { type: "AddTicket"; payload: { column_id: string; content: string } }
   | { type: "RemoveTicket"; payload: { ticket_id: string } }
   | { type: "EditTicket"; payload: { ticket_id: string; content: string } }

@@ -53,8 +53,11 @@ async fn handle_socket(
                     Ok(ClientMessage::Join {
                         participant_name,
                         facilitator_token,
+                        participant_id,
                     }) => {
-                        let participant_id = nanoid!(8);
+                        let participant_id = participant_id
+                            .filter(|id| !id.is_empty())
+                            .unwrap_or_else(|| nanoid!(8));
 
                         // Verify board exists and check facilitator auth
                         let token = match db::get_board_facilitator_token(&state.db, &board_id)

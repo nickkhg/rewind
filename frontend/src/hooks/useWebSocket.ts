@@ -38,10 +38,12 @@ export function useWebSocket(boardId: string, participantName: string) {
 
       ws.onopen = () => {
         setConnected(true);
+        const storedId = sessionStorage.getItem(`participant_id_${boardId}`);
         const joinMsg: ClientMessage = {
           type: "Join",
           payload: {
             participant_name: participantName,
+            ...(storedId ? { participant_id: storedId } : {}),
           },
         };
         ws.send(JSON.stringify(joinMsg));
@@ -54,6 +56,7 @@ export function useWebSocket(boardId: string, participantName: string) {
             setBoard(msg.payload.board);
             break;
           case "Authenticated":
+            sessionStorage.setItem(`participant_id_${boardId}`, msg.payload.participant_id);
             setAuth(msg.payload.participant_id, msg.payload.is_facilitator);
             break;
           case "Error":
