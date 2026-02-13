@@ -67,6 +67,8 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: /tmp/AuthKey.p8
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
@@ -74,6 +76,15 @@ jobs:
           name: macos-dmg
           path: target/release/bundle/dmg/*.dmg
           if-no-files-found: error
+
+      - name: Upload updater artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-updater
+          path: |
+            target/release/bundle/macos/*.tar.gz
+            target/release/bundle/macos/*.tar.gz.sig
+          if-no-files-found: warn
 
   # ─── Linux Server Binary (static musl) ────────────────────────────────
   build-server:
@@ -202,12 +213,23 @@ jobs:
           name: frontend-dist
           path: artifacts/frontend-dist
 
+      - name: Download updater artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-updater
+          path: artifacts/macos-updater
+        continue-on-error: true
+
       - name: Prepare release assets
         run: |
           mkdir -p release-assets
           cp artifacts/macos-dmg/*.dmg release-assets/
           cp artifacts/server-binary/rewind-backend release-assets/
           cp artifacts/frontend-dist/frontend-dist.tar.gz release-assets/
+          if [ -d artifacts/macos-updater ]; then
+            cp artifacts/macos-updater/*.tar.gz release-assets/ 2>/dev/null || true
+            cp artifacts/macos-updater/*.tar.gz.sig release-assets/ 2>/dev/null || true
+          fi
 
       - name: Determine version tag
         id: version
@@ -216,6 +238,32 @@ jobs:
             echo "tag=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate latest.json for updater
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          VERSION_NUM="${VERSION#v}"
+          SIG_FILE=$(find release-assets -name '*.tar.gz.sig' | head -1)
+          TAR_FILE=$(find release-assets -name '*.app.tar.gz' | head -1)
+          if [ -n "$SIG_FILE" ] && [ -n "$TAR_FILE" ]; then
+            SIGNATURE=$(cat "$SIG_FILE")
+            TAR_NAME=$(basename "$TAR_FILE")
+            cat > release-assets/latest.json << EOF
+          {
+            "version": "${VERSION_NUM}",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIGNATURE}",
+                "url": "https://github.com/nickkhg/rewind/releases/download/${VERSION}/${TAR_NAME}"
+              },
+              "darwin-x86_64": {
+                "signature": "${SIGNATURE}",
+                "url": "https://github.com/nickkhg/rewind/releases/download/${VERSION}/${TAR_NAME}"
+              }
+            }
+          }
+          EOF
           fi
 
       - name: Create GitHub Release

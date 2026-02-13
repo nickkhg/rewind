@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./router";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { hasServerUrl, isTauri, clearServerUrl } from "./lib/serverUrl";
 import Setup from "./pages/Setup";
+
+const UpdateChecker = lazy(
+  () => import("./components/layout/UpdateChecker")
+);
 
 export default function App() {
   const [ready, setReady] = useState(hasServerUrl);
@@ -21,6 +25,11 @@ export default function App() {
     <>
       <RouterProvider router={router} />
       <ThemeToggle />
+      {isTauri() && (
+        <Suspense>
+          <UpdateChecker />
+        </Suspense>
+      )}
       {isTauri() && (
         <button
           onClick={() => {
