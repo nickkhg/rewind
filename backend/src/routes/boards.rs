@@ -57,7 +57,8 @@ pub async fn create_board(
     let cookie = Cookie::build(("facilitator_id", facilitator_id))
         .path("/")
         .http_only(true)
-        .same_site(SameSite::Lax)
+        .same_site(SameSite::None)
+        .secure(true)
         .max_age(Duration::days(365));
     let jar = jar.add(cookie);
 

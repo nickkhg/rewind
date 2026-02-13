@@ -10,7 +10,7 @@ use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use state::AppState;
 use std::path::PathBuf;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
@@ -74,7 +74,11 @@ async fn main() {
     }
 
     let app = app
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::permissive()
+                .allow_origin(AllowOrigin::mirror_request())
+                .allow_credentials(true),
+        )
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
