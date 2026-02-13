@@ -1,12 +1,12 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useBoardStore } from "../store/boardStore";
 import type { ClientMessage, ServerMessage } from "../lib/types";
-
-const BASE = import.meta.env.VITE_API_URL ?? "";
+import { getServerUrl } from "../lib/serverUrl";
 
 function getWsUrl(boardId: string): string {
-  if (BASE) {
-    const url = new URL(BASE);
+  const base = getServerUrl();
+  if (base) {
+    const url = new URL(base);
     const protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return `${protocol}//${url.host}/ws/boards/${boardId}`;
   }

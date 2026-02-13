@@ -7,11 +7,10 @@ import type {
   AdminBoardSummary,
   AdminBoardDetail,
 } from "./types";
-
-const BASE = import.meta.env.VITE_API_URL ?? "";
+import { getServerUrl } from "./serverUrl";
 
 export async function createBoard(req: CreateBoardRequest): Promise<CreateBoardResponse> {
-  const res = await fetch(`${BASE}/api/boards`, {
+  const res = await fetch(`${getServerUrl()}/api/boards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
@@ -22,13 +21,13 @@ export async function createBoard(req: CreateBoardRequest): Promise<CreateBoardR
 }
 
 export async function fetchTemplates(): Promise<Template[]> {
-  const res = await fetch(`${BASE}/api/templates`);
+  const res = await fetch(`${getServerUrl()}/api/templates`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
 export async function fetchMyBoards(): Promise<MyBoardSummary[]> {
-  const res = await fetch(`${BASE}/api/my-boards`, {
+  const res = await fetch(`${getServerUrl()}/api/my-boards`, {
     credentials: "include",
   });
   if (!res.ok) throw new Error(await res.text());
@@ -42,7 +41,7 @@ function adminHeaders(token: string): HeadersInit {
 }
 
 export async function verifyAdminToken(token: string): Promise<void> {
-  const res = await fetch(`${BASE}/api/admin/verify`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/verify`, {
     method: "POST",
     headers: adminHeaders(token),
   });
@@ -50,7 +49,7 @@ export async function verifyAdminToken(token: string): Promise<void> {
 }
 
 export async function fetchAdminStats(token: string): Promise<GlobalStats> {
-  const res = await fetch(`${BASE}/api/admin/stats`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/stats`, {
     headers: adminHeaders(token),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -58,7 +57,7 @@ export async function fetchAdminStats(token: string): Promise<GlobalStats> {
 }
 
 export async function fetchAdminBoards(token: string): Promise<AdminBoardSummary[]> {
-  const res = await fetch(`${BASE}/api/admin/boards`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/boards`, {
     headers: adminHeaders(token),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -69,7 +68,7 @@ export async function fetchAdminBoardDetail(
   token: string,
   id: string,
 ): Promise<AdminBoardDetail> {
-  const res = await fetch(`${BASE}/api/admin/boards/${id}`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/boards/${id}`, {
     headers: adminHeaders(token),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -77,7 +76,7 @@ export async function fetchAdminBoardDetail(
 }
 
 export async function deleteAdminBoard(token: string, id: string): Promise<void> {
-  const res = await fetch(`${BASE}/api/admin/boards/${id}`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/boards/${id}`, {
     method: "DELETE",
     headers: adminHeaders(token),
   });
@@ -87,7 +86,7 @@ export async function deleteAdminBoard(token: string, id: string): Promise<void>
 // --- Admin Templates ---
 
 export async function fetchAdminTemplates(token: string): Promise<Template[]> {
-  const res = await fetch(`${BASE}/api/admin/templates`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/templates`, {
     headers: adminHeaders(token),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -98,7 +97,7 @@ export async function createAdminTemplate(
   token: string,
   template: { id: string; name: string; description: string; columns: string[]; position: number },
 ): Promise<void> {
-  const res = await fetch(`${BASE}/api/admin/templates`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/templates`, {
     method: "POST",
     headers: { ...adminHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify(template),
@@ -111,7 +110,7 @@ export async function updateAdminTemplate(
   id: string,
   template: { name: string; description: string; columns: string[]; position: number },
 ): Promise<void> {
-  const res = await fetch(`${BASE}/api/admin/templates/${id}`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/templates/${id}`, {
     method: "PUT",
     headers: { ...adminHeaders(token), "Content-Type": "application/json" },
     body: JSON.stringify(template),
@@ -120,7 +119,7 @@ export async function updateAdminTemplate(
 }
 
 export async function deleteAdminTemplate(token: string, id: string): Promise<void> {
-  const res = await fetch(`${BASE}/api/admin/templates/${id}`, {
+  const res = await fetch(`${getServerUrl()}/api/admin/templates/${id}`, {
     method: "DELETE",
     headers: adminHeaders(token),
   });

@@ -4,6 +4,7 @@ import { Logo } from "../components/layout/Logo";
 import { createBoard, fetchMyBoards, fetchTemplates } from "../lib/api";
 import type { MyBoardSummary, Template } from "../lib/types";
 import { COLUMN_COLORS } from "../lib/types";
+import { isTauri, getServerUrl } from "../lib/serverUrl";
 
 const DEFAULT_COLUMNS = ["Went Well", "To Improve", "Action Items"];
 
@@ -313,14 +314,21 @@ export default function Home() {
           </div>
         )}
 
-        <p className="text-center mt-4">
-          <a
-            href="/admin"
-            className="text-xs text-muted hover:text-ink transition-colors"
-          >
-            Admin
-          </a>
-        </p>
+        <div className="text-center mt-4 space-y-1">
+          <p>
+            <a
+              href="/admin"
+              className="text-xs text-muted hover:text-ink transition-colors"
+            >
+              Admin
+            </a>
+          </p>
+          {isTauri() && (
+            <p className="text-xs text-muted opacity-60">
+              {getServerUrl()}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
