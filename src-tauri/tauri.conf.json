@@ -28,7 +28,14 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "icons/AppIcon.icon/icon.json": "AppIcon.icon/icon.json",
+      "icons/AppIcon.icon/Assets/backward.fill 4.svg": "AppIcon.icon/Assets/backward.fill 4.svg"
+    },
+    "macOS": {
+      "infoPlist": "./Info.plist"
+    }
   },
   "plugins": {
     "deep-link": {
