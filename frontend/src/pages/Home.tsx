@@ -23,6 +23,20 @@ function formatRelativeDate(dateStr: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function extractBoardId(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  // Try to extract from a URL like /board/{id}
+  const urlMatch = trimmed.match(/\/board\/([a-zA-Z0-9-]+)/);
+  if (urlMatch) return urlMatch[1];
+
+  // Treat as a raw board ID (UUID-like)
+  if (/^[a-zA-Z0-9-]+$/.test(trimmed)) return trimmed;
+
+  return null;
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
@@ -34,6 +48,8 @@ export default function Home() {
   const [error, setError] = useState("");
   const [myBoards, setMyBoards] = useState<MyBoardSummary[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [joinInput, setJoinInput] = useState("");
+  const [joinError, setJoinError] = useState("");
 
   function selectTemplate(template: Template | null) {
     if (template) {
@@ -280,6 +296,49 @@ export default function Home() {
             {loading ? "Creating..." : "Start Retro"}
           </button>
         </form>
+
+        <div className="flex items-center gap-4 my-6">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs font-medium text-muted uppercase tracking-widest">or</span>
+          <div className="flex-1 h-px bg-border" />
+        </div>
+
+        <div className="bg-surface rounded-2xl shadow-sm border border-border p-6">
+          <h2 className="font-display text-base font-semibold mb-3">Join a board</h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setJoinError("");
+              const boardId = extractBoardId(joinInput);
+              if (!boardId) {
+                setJoinError("Enter a valid board ID or link");
+                return;
+              }
+              navigate(`/board/${boardId}`);
+            }}
+            className="flex gap-2"
+          >
+            <input
+              type="text"
+              value={joinInput}
+              onChange={(e) => {
+                setJoinInput(e.target.value);
+                if (joinError) setJoinError("");
+              }}
+              placeholder="Paste a board ID or link"
+              className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
+            />
+            <button
+              type="submit"
+              className="bg-accent text-white font-medium px-5 py-2 rounded-lg hover:bg-accent-hover transition-colors text-sm shrink-0"
+            >
+              Join
+            </button>
+          </form>
+          {joinError && (
+            <p className="text-sm text-red-600 mt-2">{joinError}</p>
+          )}
+        </div>
 
         {myBoards.length > 0 && (
           <div className="mt-10 animate-card-enter">
