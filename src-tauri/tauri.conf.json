@@ -30,8 +30,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "icons/AppIcon.icon/icon.json": "AppIcon.icon/icon.json",
-      "icons/AppIcon.icon/Assets/backward.fill 4.svg": "AppIcon.icon/Assets/backward.fill 4.svg"
+      "icons/Assets.car": "Assets.car"
     },
     "macOS": {
       "infoPlist": "./Info.plist"
