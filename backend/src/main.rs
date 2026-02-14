@@ -13,6 +13,8 @@ use std::path::PathBuf;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
+use http::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE};
+use http::Method;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -75,7 +77,9 @@ async fn main() {
 
     let app = app
         .layer(
-            CorsLayer::permissive()
+            CorsLayer::new()
+                .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE])
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
                 .allow_origin(AllowOrigin::mirror_request())
                 .allow_credentials(true),
         )
