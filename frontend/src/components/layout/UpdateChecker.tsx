@@ -1,38 +1,52 @@
 import { useEffect, useState, useCallback } from "react";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 
 type Phase =
   | { step: "checking" }
   | { step: "available"; version: string; update: Update }
   | { step: "downloading"; percent: number }
   | { step: "ready" }
+  | { step: "no-update"; currentVersion: string }
   | { step: "error"; message: string };
 
 export default function UpdateChecker() {
   const [phase, setPhase] = useState<Phase | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(async () => {
-      try {
-        setPhase({ step: "checking" });
-        const update = await check();
-        if (update) {
-          setPhase({
-            step: "available",
-            version: update.version,
-            update,
-          });
-        } else {
-          setPhase(null);
-        }
-      } catch {
+  const checkForUpdates = useCallback(async (silent: boolean) => {
+    try {
+      setDismissed(false);
+      setPhase({ step: "checking" });
+      const update = await check();
+      if (update) {
+        setPhase({ step: "available", version: update.version, update });
+      } else if (silent) {
         setPhase(null);
+      } else {
+        const currentVersion = await getVersion();
+        setPhase({ step: "no-update", currentVersion });
       }
-    }, 3000);
-    return () => clearTimeout(timer);
+    } catch {
+      if (silent) {
+        setPhase(null);
+      } else {
+        setPhase({ step: "error", message: "Could not check for updates" });
+      }
+    }
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => checkForUpdates(true), 3000);
+    return () => clearTimeout(timer);
+  }, [checkForUpdates]);
+
+  useEffect(() => {
+    const unlisten = listen("check-for-updates", () => checkForUpdates(false));
+    return () => { unlisten.then((fn) => fn()); };
+  }, [checkForUpdates]);
 
   const install = useCallback(async (update: Update) => {
     try {
@@ -230,6 +244,59 @@ export default function UpdateChecker() {
             >
               Restarting...
             </p>
+          </div>
+        )}
+
+        {phase.step === "no-update" && (
+          <div className="flex items-start gap-3">
+            <div
+              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              style={{
+                backgroundColor:
+                  "color-mix(in srgb, #22c55e 12%, transparent)",
+                color: "#22c55e",
+              }}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p
+                className="text-sm font-semibold"
+                style={{ color: "var(--color-ink)" }}
+              >
+                You're up to date
+              </p>
+              <p
+                className="mt-0.5 text-xs"
+                style={{ color: "var(--color-muted)" }}
+              >
+                Rewind v{phase.currentVersion} is the latest version
+              </p>
+              <button
+                onClick={() => setDismissed(true)}
+                className="mt-2 cursor-pointer text-xs font-medium transition-colors"
+                style={{ color: "var(--color-muted)" }}
+                onMouseEnter={(e) =>
+                  (e.currentTarget.style.color = "var(--color-ink)")
+                }
+                onMouseLeave={(e) =>
+                  (e.currentTarget.style.color = "var(--color-muted)")
+                }
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 

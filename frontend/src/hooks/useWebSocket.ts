@@ -39,11 +39,13 @@ export function useWebSocket(boardId: string, participantName: string) {
       ws.onopen = () => {
         setConnected(true);
         const storedId = sessionStorage.getItem(`participant_id_${boardId}`);
+        const facToken = sessionStorage.getItem(`facilitator_token_${boardId}`);
         const joinMsg: ClientMessage = {
           type: "Join",
           payload: {
             participant_name: participantName,
             ...(storedId ? { participant_id: storedId } : {}),
+            ...(facToken ? { facilitator_token: facToken } : {}),
           },
         };
         ws.send(JSON.stringify(joinMsg));

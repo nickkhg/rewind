@@ -6,6 +6,8 @@
     "core:default",
     "shell:allow-open",
     "deep-link:default",
-    "updater:default"
+    "updater:default",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }

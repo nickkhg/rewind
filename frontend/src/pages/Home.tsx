@@ -104,6 +104,7 @@ export default function Home() {
         columns: trimmedCols,
         is_anonymous: isAnonymous || undefined,
       });
+      sessionStorage.setItem(`facilitator_token_${res.board.id}`, res.facilitator_token);
       if (isAnonymous) {
         sessionStorage.setItem(`participant_name_${res.board.id}`, "__anonymous__");
       } else {

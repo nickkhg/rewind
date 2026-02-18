@@ -98,22 +98,48 @@ export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProp
           </div>
         </div>
       ) : (
-        <p
-          className="text-sm whitespace-pre-wrap transition-[filter] duration-500 ease-out"
-          style={{ filter: isBlurred ? "blur(8px)" : "blur(0)" }}
-        >
-          {ticket.content}
-        </p>
+        <div className="relative">
+          <p
+            className="text-sm whitespace-pre-wrap transition-[filter] duration-500 ease-out"
+            style={{
+              filter: isBlurred ? "blur(8px)" : "blur(0)",
+              ...(isBlurred ? { userSelect: "none", pointerEvents: "none" } as React.CSSProperties : {}),
+            }}
+          >
+            {ticket.content}
+          </p>
+          {isBlurred && (
+            <p
+              className="absolute inset-0 text-sm whitespace-pre-wrap text-transparent"
+              aria-hidden
+            >
+              {"\ud83d\udea8 Hacker alert! Did you really think this would work?"}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Footer: author, votes, actions */}
       <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-border/40">
         {!board?.is_anonymous && (
-          <span
-            className="text-xs text-muted truncate max-w-[120px] transition-[filter] duration-500 ease-out"
-            style={{ filter: isBlurred ? "blur(8px)" : "blur(0)" }}
-          >
-            {ticket.author_name}
+          <span className="relative">
+            <span
+              className="text-xs text-muted truncate max-w-[120px] transition-[filter] duration-500 ease-out"
+              style={{
+                filter: isBlurred ? "blur(8px)" : "blur(0)",
+                ...(isBlurred ? { userSelect: "none", pointerEvents: "none" } as React.CSSProperties : {}),
+              }}
+            >
+              {ticket.author_name}
+            </span>
+            {isBlurred && (
+              <span
+                className="absolute inset-0 text-xs text-transparent truncate max-w-[120px]"
+                aria-hidden
+              >
+                nice try
+              </span>
+            )}
           </span>
         )}
         <div className="flex items-center gap-2">
