@@ -1,0 +1,15 @@
+# Slim CI image — expects pre-built binary and frontend assets.
+# Used by the release workflow to avoid redundant builds.
+#
+# For local development, use the main Dockerfile which builds from source.
+FROM alpine:3.21
+RUN adduser -D rewind
+
+COPY rewind-backend /usr/local/bin/rewind
+COPY frontend-dist/ /srv/static
+
+USER rewind
+ENV STATIC_DIR=/srv/static PORT=3001
+EXPOSE 3001
+
+CMD ["rewind"]

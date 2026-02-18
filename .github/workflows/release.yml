@@ -144,10 +144,31 @@ jobs:
           if-no-files-found: error
 
   # ─── Docker Image (ghcr.io) ─────────────────────────────────────────────
+  # Reuses artifacts from build-server and build-frontend instead of
+  # rebuilding from source — see Dockerfile.ci.
   build-docker:
     runs-on: ubuntu-latest
+    needs: [build-server, build-frontend]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: server-binary
+          path: .
+
+      - name: Download frontend assets
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: .
+
+      - name: Prepare Docker context
+        run: |
+          chmod +x rewind-backend
+          mkdir -p frontend-dist
+          tar -xzf frontend-dist.tar.gz -C frontend-dist
 
       - name: Determine version tag
         id: version
@@ -182,6 +203,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.ci
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
