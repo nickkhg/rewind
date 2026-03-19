@@ -1,5 +1,11 @@
 # Rewind
 
+[![GitHub release](https://img.shields.io/github/v/release/nickkhg/rewind?style=flat-square)](https://github.com/nickkhg/rewind/releases/latest)
+[![License](https://img.shields.io/github/license/nickkhg/rewind?style=flat-square)](LICENSE)
+[![Docker image](https://img.shields.io/badge/ghcr.io-rewind-blue?style=flat-square&logo=docker)](https://ghcr.io/nickkhg/rewind)
+
+[**Download macOS DMG**](https://github.com/nickkhg/rewind/releases/latest/download/Rewind_1.5.0_aarch64.dmg) | [**Docker Image**](https://github.com/nickkhg/rewind/pkgs/container/rewind) | [**Linux Binary**](https://github.com/nickkhg/rewind/releases/latest/download/rewind-backend)
+
 A real-time retrospective tool for teams. Run column-based retro sessions where everyone collaborates live — as a website or macOS desktop app.
 
 No accounts needed. The facilitator creates a board, shares a link, and the team adds cards, votes, and reveals together. Boards are persisted in PostgreSQL so they survive server restarts.
