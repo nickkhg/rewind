@@ -13,6 +13,8 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
   const [open, setOpen] = useState(false);
   const isBlurred = useBoardStore((s) => s.board?.is_blurred ?? true);
   const hideVotes = useBoardStore((s) => s.board?.hide_votes ?? false);
+  const facilitatorPeek = useBoardStore((s) => s.facilitatorPeek);
+  const toggleFacilitatorPeek = useBoardStore((s) => s.toggleFacilitatorPeek);
 
   useEffect(() => {
     if (!open) return;
@@ -92,6 +94,18 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
                     ? "Cards are hidden. Authors can still see their own."
                     : "All cards are visible to everyone."}
                 </p>
+                {isBlurred && (
+                  <button
+                    onClick={toggleFacilitatorPeek}
+                    className={`mt-2 px-3 py-1.5 text-sm rounded-lg border transition-colors w-full ${
+                      facilitatorPeek
+                        ? "border-amber-400 bg-amber-400/10 text-amber-600 hover:bg-amber-400/20"
+                        : "border-border hover:bg-canvas"
+                    }`}
+                  >
+                    {facilitatorPeek ? "Stop Peeking" : "Peek at Cards"}
+                  </button>
+                )}
               </div>
 
               <hr className="border-border" />

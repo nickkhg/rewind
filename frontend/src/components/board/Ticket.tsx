@@ -20,9 +20,9 @@ function seededRotation(id: string): number {
 }
 
 export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProps) {
-  const { participantId, isFacilitator, board } = useBoardStore();
+  const { participantId, isFacilitator, board, facilitatorPeek } = useBoardStore();
   const isAuthor = ticket.author_id === participantId;
-  const isBlurred = board?.is_blurred && !isAuthor;
+  const isBlurred = board?.is_blurred && !isAuthor && !(isFacilitator && facilitatorPeek);
   const hasVoted = participantId ? ticket.votes.includes(participantId) : false;
   const rotation = seededRotation(ticket.id);
 
