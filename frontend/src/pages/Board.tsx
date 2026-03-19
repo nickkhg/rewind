@@ -180,9 +180,9 @@ export default function Board() {
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <main className="flex-1 overflow-x-auto">
-          <div className="max-w-[1400px] mx-auto px-4 py-6">
-            <div className="flex gap-6">
+        <main className="flex-1 overflow-x-auto min-h-0">
+          <div className="max-w-[1400px] mx-auto px-4 py-6 h-full">
+            <div className="flex gap-6 h-full">
               {board.columns.map((col, i) => (
                 <Column
                   key={col.id}

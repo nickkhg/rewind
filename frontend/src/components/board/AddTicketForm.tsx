@@ -18,7 +18,7 @@ export function AddTicketForm({ columnId, send }: AddTicketFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="mt-3">
+    <form onSubmit={handleSubmit} className="mb-3">
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}

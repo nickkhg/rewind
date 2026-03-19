@@ -29,7 +29,7 @@ export function Column({ column, color, send }: ColumnProps) {
   const voteLimitReached = voteLimit !== null && myVotesInColumn >= voteLimit;
 
   return (
-    <div className="flex-1 min-w-[280px] max-w-[400px]">
+    <div className="flex-1 min-w-[280px] max-w-[400px] flex flex-col min-h-0">
       <div className="flex items-center gap-2 mb-3">
         <div
           className="w-3 h-3 rounded-full shrink-0"
@@ -44,7 +44,9 @@ export function Column({ column, color, send }: ColumnProps) {
         )}
       </div>
 
-      <div className="space-y-2.5">
+      <AddTicketForm columnId={column.id} send={send} />
+
+      <div className="space-y-2.5 overflow-y-auto min-h-0 flex-1">
         {sorted.map((ticket) => (
           <DraggableTicket
             key={ticket.id}
@@ -56,8 +58,6 @@ export function Column({ column, color, send }: ColumnProps) {
           />
         ))}
       </div>
-
-      <AddTicketForm columnId={column.id} send={send} />
     </div>
   );
 }
