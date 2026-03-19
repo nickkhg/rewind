@@ -13,7 +13,9 @@ interface TicketProps {
 export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProps) {
   const { participantId, isFacilitator, board, facilitatorPeek } = useBoardStore();
   const isAuthor = ticket.author_id === participantId;
-  const isBlurred = board?.is_blurred && !isAuthor && !(isFacilitator && facilitatorPeek);
+  const isEditor = !!(board && participantId && board.editors.some((e) => e.participant_id === participantId));
+  const isPrivileged = isFacilitator || isEditor;
+  const isBlurred = board?.is_blurred && !isAuthor && !(isPrivileged && facilitatorPeek);
   const hasVoted = participantId ? ticket.votes.includes(participantId) : false;
 
   const [editing, setEditing] = useState(false);
@@ -140,8 +142,8 @@ export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProp
             hideVotes={board?.hide_votes}
             send={send}
           />
-          {/* Edit/Delete/Split shown on hover for author or facilitator */}
-          {(isAuthor || isFacilitator) && !editing && (
+          {/* Edit/Delete/Split shown on hover for author, facilitator, or editor */}
+          {(isAuthor || isPrivileged) && !editing && (
             <div className="hidden group-hover:flex items-center gap-1">
               {isMerged && (
                 <div className="relative" ref={splitRef}>

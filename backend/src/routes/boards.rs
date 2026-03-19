@@ -52,7 +52,7 @@ pub async fn create_board(
     )
     .await?;
 
-    let view = board.to_view_with_participants(0);
+    let view = board.to_view_with_participants(0, Vec::new(), Vec::new());
 
     let cookie = Cookie::build(("facilitator_id", facilitator_id))
         .path("/")
@@ -80,7 +80,9 @@ pub async fn get_board(
         .ok_or_else(|| AppError::NotFound("Board not found".to_string()))?;
 
     let count = state.participant_count(&board_id).await;
-    Ok(Json(board.to_view_with_participants(count)))
+    let editors = db::get_board_editors(&state.db, &board_id).await.unwrap_or_default();
+    let editor_requests = db::get_editor_requests(&state.db, &board_id).await.unwrap_or_default();
+    Ok(Json(board.to_view_with_participants(count, editors, editor_requests)))
 }
 
 pub async fn list_templates(

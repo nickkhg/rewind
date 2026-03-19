@@ -54,10 +54,29 @@ pub struct BoardView {
     pub participant_count: usize,
     pub vote_limit_per_column: Option<i32>,
     pub timer_end: Option<DateTime<Utc>>,
+    pub editors: Vec<EditorView>,
+    pub editor_requests: Vec<EditorRequestView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EditorView {
+    pub participant_id: String,
+    pub participant_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EditorRequestView {
+    pub participant_id: String,
+    pub participant_name: String,
 }
 
 impl Board {
-    pub fn to_view_with_participants(&self, count: usize) -> BoardView {
+    pub fn to_view_with_participants(
+        &self,
+        count: usize,
+        editors: Vec<EditorView>,
+        editor_requests: Vec<EditorRequestView>,
+    ) -> BoardView {
         BoardView {
             id: self.id.clone(),
             title: self.title.clone(),
@@ -69,6 +88,8 @@ impl Board {
             participant_count: count,
             vote_limit_per_column: self.vote_limit_per_column,
             timer_end: self.timer_end,
+            editors,
+            editor_requests,
         }
     }
 }

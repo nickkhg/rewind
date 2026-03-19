@@ -4,6 +4,7 @@ import { useBoardStore } from "../../store/boardStore";
 import { FacilitatorMenu } from "./FacilitatorMenu";
 import { TimerDisplay } from "./TimerDisplay";
 import { SortControls } from "./SortControls";
+import { EditorRequestButton } from "./EditorRequestButton";
 import type { ClientMessage } from "../../lib/types";
 
 interface BoardHeaderProps {
@@ -11,8 +12,9 @@ interface BoardHeaderProps {
 }
 
 export function BoardHeader({ send }: BoardHeaderProps) {
-  const { board, isFacilitator, isConnected } = useBoardStore();
+  const { board, isFacilitator, isConnected, participantId } = useBoardStore();
   const [copied, setCopied] = useState(false);
+  const isEditor = !!(board && participantId && board.editors.some((e) => e.participant_id === participantId));
 
   if (!board) return null;
 
@@ -39,7 +41,8 @@ export function BoardHeader({ send }: BoardHeaderProps) {
         <div className="flex items-center gap-3 shrink-0">
           <SortControls />
           <TimerDisplay />
-          {isFacilitator && <FacilitatorMenu send={send} />}
+          {!isFacilitator && !isEditor && <EditorRequestButton send={send} />}
+          {(isFacilitator || isEditor) && <FacilitatorMenu send={send} />}
           <button
             onClick={handleCopy}
             className="px-3 py-1.5 text-sm rounded-lg border border-border hover:bg-canvas transition-colors"

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use std::collections::HashSet;
 
-use crate::models::{Board, Column, Ticket};
+use crate::models::{Board, Column, EditorRequestView, EditorView, Ticket};
 use crate::state::MergeSnapshot;
 
 // --- Board ---
@@ -767,6 +767,149 @@ pub async fn set_timer_end(
     Ok(())
 }
 
+// --- Editor Requests & Board Editors ---
+
+pub async fn get_board_editors(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Vec<EditorView>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, EditorRow>(
+        "SELECT participant_id, participant_name FROM board_editors WHERE board_id = $1",
+    )
+    .bind(board_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| EditorView {
+            participant_id: r.participant_id,
+            participant_name: r.participant_name,
+        })
+        .collect())
+}
+
+pub async fn get_editor_requests(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Vec<EditorRequestView>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, EditorRequestRow>(
+        "SELECT participant_id, participant_name FROM editor_requests WHERE board_id = $1 ORDER BY created_at",
+    )
+    .bind(board_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| EditorRequestView {
+            participant_id: r.participant_id,
+            participant_name: r.participant_name,
+        })
+        .collect())
+}
+
+pub async fn is_editor(
+    pool: &PgPool,
+    board_id: &str,
+    participant_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM board_editors WHERE board_id = $1 AND participant_id = $2",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count > 0)
+}
+
+pub async fn create_editor_request(
+    pool: &PgPool,
+    board_id: &str,
+    participant_id: &str,
+    participant_name: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO editor_requests (board_id, participant_id, participant_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .bind(participant_name)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn approve_editor(
+    pool: &PgPool,
+    board_id: &str,
+    participant_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // Fetch the request to get the name before deleting
+    let request = sqlx::query_as::<_, EditorRequestRow>(
+        "SELECT participant_id, participant_name FROM editor_requests WHERE board_id = $1 AND participant_id = $2",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some(request) = request else {
+        return Ok(false);
+    };
+
+    sqlx::query(
+        "DELETE FROM editor_requests WHERE board_id = $1 AND participant_id = $2",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO board_editors (board_id, participant_id, participant_name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .bind(&request.participant_name)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(true)
+}
+
+pub async fn decline_editor(
+    pool: &PgPool,
+    board_id: &str,
+    participant_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "DELETE FROM editor_requests WHERE board_id = $1 AND participant_id = $2",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn remove_editor(
+    pool: &PgPool,
+    board_id: &str,
+    participant_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "DELETE FROM board_editors WHERE board_id = $1 AND participant_id = $2",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // --- Row types for query_as ---
 
 #[derive(sqlx::FromRow)]
@@ -886,4 +1029,16 @@ pub struct AdminBoardRow {
     pub column_count: i64,
     pub ticket_count: i64,
     pub vote_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct EditorRow {
+    participant_id: String,
+    participant_name: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct EditorRequestRow {
+    participant_id: String,
+    participant_name: String,
 }

@@ -1,3 +1,13 @@
+export interface EditorInfo {
+  participant_id: string;
+  participant_name: string;
+}
+
+export interface EditorRequest {
+  participant_id: string;
+  participant_name: string;
+}
+
 export interface Board {
   id: string;
   title: string;
@@ -9,6 +19,8 @@ export interface Board {
   hide_votes: boolean;
   vote_limit_per_column: number | null;
   timer_end: string | null;
+  editors: EditorInfo[];
+  editor_requests: EditorRequest[];
 }
 
 export interface Column {
@@ -51,7 +63,11 @@ export type ClientMessage =
   | { type: "SplitTicket"; payload: { ticket_id: string; segment_index: number } }
   | { type: "SetVoteLimit"; payload: { limit: number | null } }
   | { type: "StartTimer"; payload: { duration_secs: number } }
-  | { type: "StopTimer" };
+  | { type: "StopTimer" }
+  | { type: "RequestEditor"; payload: { name?: string } }
+  | { type: "ApproveEditor"; payload: { participant_id: string } }
+  | { type: "DeclineEditor"; payload: { participant_id: string } }
+  | { type: "RemoveEditor"; payload: { participant_id: string } };
 
 export type ServerMessage =
   | { type: "BoardState"; payload: { board: Board } }

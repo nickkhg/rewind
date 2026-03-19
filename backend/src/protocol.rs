@@ -41,6 +41,18 @@ pub enum ClientMessage {
         duration_secs: u32,
     },
     StopTimer,
+    RequestEditor {
+        name: Option<String>,
+    },
+    ApproveEditor {
+        participant_id: String,
+    },
+    DeclineEditor {
+        participant_id: String,
+    },
+    RemoveEditor {
+        participant_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -15,6 +15,9 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
   const hideVotes = useBoardStore((s) => s.board?.hide_votes ?? false);
   const facilitatorPeek = useBoardStore((s) => s.facilitatorPeek);
   const toggleFacilitatorPeek = useBoardStore((s) => s.toggleFacilitatorPeek);
+  const isFacilitator = useBoardStore((s) => s.isFacilitator);
+  const editors = useBoardStore((s) => s.board?.editors ?? []);
+  const editorRequests = useBoardStore((s) => s.board?.editor_requests ?? []);
 
   useEffect(() => {
     if (!open) return;
@@ -48,6 +51,11 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
             open ? "-translate-y-[3px] -rotate-45" : ""
           }`}
         />
+        {isFacilitator && editorRequests.length > 0 && !open && (
+          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-accent text-white text-[10px] font-semibold leading-none px-1">
+            {editorRequests.length}
+          </span>
+        )}
       </button>
 
       {/* Backdrop + Panel — portaled to body to escape header's stacking context */}
@@ -141,6 +149,88 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
 
               {/* Timer */}
               <TimerControl send={send} />
+
+              {/* Editors & Requests — facilitator only */}
+              {isFacilitator && (editors.length > 0 || editorRequests.length > 0) && (
+                <>
+                  <hr className="border-border" />
+                  <div>
+                    <span className="text-sm font-medium">Editors</span>
+
+                    {editors.length > 0 && (
+                      <div className="mt-2 space-y-2">
+                        {editors.map((editor) => (
+                          <div
+                            key={editor.participant_id}
+                            className="flex items-center justify-between gap-2 p-2 rounded-lg bg-canvas border border-border"
+                          >
+                            <span className="text-sm truncate">
+                              {editor.participant_name || editor.participant_id}
+                            </span>
+                            <button
+                              onClick={() =>
+                                send({
+                                  type: "RemoveEditor",
+                                  payload: { participant_id: editor.participant_id },
+                                })
+                              }
+                              className="px-2 py-1 text-xs rounded-md text-muted hover:text-red-600 hover:bg-red-500/10 border border-transparent hover:border-red-500/30 transition-colors shrink-0"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {editors.length === 0 && editorRequests.length === 0 && (
+                      <p className="text-xs text-muted mt-1">No editors yet.</p>
+                    )}
+
+                    {editorRequests.length > 0 && (
+                      <div className="mt-3">
+                        <span className="text-xs font-medium text-muted uppercase tracking-wide">
+                          Pending Requests
+                        </span>
+                        <div className="mt-1.5 space-y-2">
+                          {editorRequests.map((req) => (
+                            <div
+                              key={req.participant_id}
+                              className="flex items-center justify-between gap-2 p-2 rounded-lg bg-canvas border border-border"
+                            >
+                              <span className="text-sm truncate">{req.participant_name}</span>
+                              <div className="flex gap-1 shrink-0">
+                                <button
+                                  onClick={() =>
+                                    send({
+                                      type: "ApproveEditor",
+                                      payload: { participant_id: req.participant_id },
+                                    })
+                                  }
+                                  className="px-2 py-1 text-xs rounded-md bg-green-500/10 text-green-600 border border-green-500/30 hover:bg-green-500/20 transition-colors"
+                                >
+                                  Accept
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    send({
+                                      type: "DeclineEditor",
+                                      payload: { participant_id: req.participant_id },
+                                    })
+                                  }
+                                  className="px-2 py-1 text-xs rounded-md bg-red-500/10 text-red-600 border border-red-500/30 hover:bg-red-500/20 transition-colors"
+                                >
+                                  Decline
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>,

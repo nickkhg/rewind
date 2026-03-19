@@ -32,7 +32,9 @@ async fn broadcast_board_state(state: &AppState, board_id: &str) {
         _ => return,
     };
     let count = state.participant_count(board_id).await;
-    let view = board.to_view_with_participants(count);
+    let editors = db::get_board_editors(&state.db, board_id).await.unwrap_or_default();
+    let editor_requests = db::get_editor_requests(&state.db, board_id).await.unwrap_or_default();
+    let view = board.to_view_with_participants(count, editors, editor_requests);
     let tx = state.get_or_create_channel(board_id).await;
     let _ = tx.send(ServerMessage::BoardState { board: view });
 }
@@ -188,8 +190,10 @@ async fn handle_socket(
     {
         if let Ok(Some(board)) = db::get_board(&state.db, &board_id).await {
             let count = state.participant_count(&board_id).await;
+            let editors = db::get_board_editors(&state.db, &board_id).await.unwrap_or_default();
+            let editor_requests = db::get_editor_requests(&state.db, &board_id).await.unwrap_or_default();
             let msg = ServerMessage::BoardState {
-                board: board.to_view_with_participants(count),
+                board: board.to_view_with_participants(count, editors, editor_requests),
             };
             let _ = sender
                 .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
@@ -273,6 +277,12 @@ async fn handle_message(
     is_facilitator: bool,
     msg: ClientMessage,
 ) -> bool {
+    // Check editor status for privileged actions
+    let is_editor = db::is_editor(&state.db, board_id, participant_id)
+        .await
+        .unwrap_or(false);
+    let is_privileged = is_facilitator || is_editor;
+
     match msg {
         ClientMessage::Join { .. } => false,
 
@@ -304,9 +314,9 @@ async fn handle_message(
         }
 
         ClientMessage::RemoveTicket { ticket_id } => {
-            // Check authorization: author or facilitator
+            // Check authorization: author, facilitator, or editor
             match db::get_ticket_author(&state.db, &ticket_id).await {
-                Ok(Some(author_id)) if author_id == participant_id || is_facilitator => {}
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
                 _ => return false,
             }
 
@@ -375,7 +385,7 @@ async fn handle_message(
         }
 
         ClientMessage::ToggleBlur => {
-            if !is_facilitator {
+            if !is_privileged {
                 return false;
             }
             let current = match db::get_blur_state(&state.db, board_id).await {
@@ -392,7 +402,7 @@ async fn handle_message(
         }
 
         ClientMessage::ToggleHideVotes => {
-            if !is_facilitator {
+            if !is_privileged {
                 return false;
             }
             let current = match db::get_hide_votes(&state.db, board_id).await {
@@ -447,9 +457,9 @@ async fn handle_message(
             ticket_id,
             segment_index,
         } => {
-            // Auth: author or facilitator
+            // Auth: author, facilitator, or editor
             match db::get_ticket_author(&state.db, &ticket_id).await {
-                Ok(Some(author_id)) if author_id == participant_id || is_facilitator => {}
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
                 _ => return false,
             }
 
@@ -474,7 +484,7 @@ async fn handle_message(
         }
 
         ClientMessage::SetVoteLimit { limit } => {
-            if !is_facilitator {
+            if !is_privileged {
                 return false;
             }
             // Validate: must be >= 1 or None
@@ -493,7 +503,7 @@ async fn handle_message(
         }
 
         ClientMessage::StartTimer { duration_secs } => {
-            if !is_facilitator {
+            if !is_privileged {
                 return false;
             }
             if !(1..=3600).contains(&duration_secs) {
@@ -510,13 +520,85 @@ async fn handle_message(
         }
 
         ClientMessage::StopTimer => {
-            if !is_facilitator {
+            if !is_privileged {
                 return false;
             }
             match db::set_timer_end(&state.db, board_id, None).await {
                 Ok(()) => true,
                 Err(e) => {
                     warn!("Failed to stop timer: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::RequestEditor { name } => {
+            // Can't request if already facilitator or editor
+            if is_facilitator || is_editor {
+                return false;
+            }
+            // For anonymous boards, a name must be provided
+            let request_name = if let Some(n) = name {
+                if n.trim().is_empty() {
+                    return false;
+                }
+                n.trim().to_string()
+            } else if participant_name.is_empty() {
+                // Anonymous board with no name provided
+                return false;
+            } else {
+                participant_name.to_string()
+            };
+
+            match db::create_editor_request(&state.db, board_id, participant_id, &request_name).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to create editor request: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::ApproveEditor { participant_id: target_id } => {
+            // Only facilitator can approve
+            if !is_facilitator {
+                return false;
+            }
+            match db::approve_editor(&state.db, board_id, &target_id).await {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    warn!("Failed to approve editor: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::DeclineEditor { participant_id: target_id } => {
+            // Only facilitator can decline
+            if !is_facilitator {
+                return false;
+            }
+            match db::decline_editor(&state.db, board_id, &target_id).await {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    warn!("Failed to decline editor: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::RemoveEditor { participant_id: target_id } => {
+            // Only facilitator can remove editors
+            if !is_facilitator {
+                return false;
+            }
+            match db::remove_editor(&state.db, board_id, &target_id).await {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    warn!("Failed to remove editor: {e}");
                     false
                 }
             }

@@ -20,6 +20,7 @@ No accounts needed. The facilitator creates a board, shares a link, and the team
 - **Real-time collaboration** — cards, votes, and blur state sync instantly via WebSocket
 - **Blur / Reveal** — facilitator controls card visibility; authors always see their own cards
 - **Voting** — toggle votes on any card, sort by most votes or newest
+- **Editor access requests** — participants can request editor privileges; the facilitator approves or declines from the settings menu. Editors get the same controls as the facilitator (blur, vote limits, timer, delete/split cards). On anonymous boards, requesters provide a display name. The facilitator can revoke editor access at any time
 - **Board templates** — Classic, Start/Stop/Continue, 4Ls, Mad Sad Glad, Sailboat, DAKI — managed in the database
 - **Custom columns** — or define your own column layout
 - **Anonymous boards** — optional name-free mode (enabled by default)
