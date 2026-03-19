@@ -18,7 +18,7 @@ No accounts needed. The facilitator creates a board, shares a link, and the team
 ## Features
 
 - **Real-time collaboration** — cards, votes, and blur state sync instantly via WebSocket
-- **Blur / Reveal** — facilitator controls card visibility; authors always see their own cards
+- **Blur / Reveal** — facilitator controls card visibility; authors always see their own cards. Facilitators and editors can peek at blurred cards without revealing them to everyone
 - **Voting** — toggle votes on any card, sort by most votes or newest
 - **Editor access requests** — participants can request editor privileges; the facilitator approves or declines from the settings menu. Editors get the same controls as the facilitator (blur, vote limits, timer, delete/split cards). On anonymous boards, requesters provide a display name. The facilitator can revoke editor access at any time
 - **Board templates** — Classic, Start/Stop/Continue, 4Ls, Mad Sad Glad, Sailboat, DAKI — managed in the database
@@ -280,4 +280,4 @@ All admin endpoints require `Authorization: Bearer <plaintext-token>`.
 
 - **Fonts**: Fraunces (display) + Plus Jakarta Sans (body)
 - **Palette**: warm canvas `#faf8f5`, terracotta accent `#e07a5f`, column colors (green, rose, amber, blue, purple)
-- **Details**: colored left borders, seeded card rotation, blur reveal transition, vote bounce animation, subtle noise texture
+- **Details**: colored left borders, blur reveal transition, vote bounce animation, subtle noise texture
