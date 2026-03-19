@@ -10,21 +10,11 @@ interface TicketProps {
   send: (msg: ClientMessage) => void;
 }
 
-function seededRotation(id: string): number {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = (hash << 5) - hash + id.charCodeAt(i);
-    hash |= 0;
-  }
-  return ((hash % 200) / 100) - 1; // -1 to 1 degrees
-}
-
 export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProps) {
   const { participantId, isFacilitator, board, facilitatorPeek } = useBoardStore();
   const isAuthor = ticket.author_id === participantId;
   const isBlurred = board?.is_blurred && !isAuthor && !(isFacilitator && facilitatorPeek);
   const hasVoted = participantId ? ticket.votes.includes(participantId) : false;
-  const rotation = seededRotation(ticket.id);
 
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(ticket.content);
@@ -68,7 +58,6 @@ export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProp
       style={{
         borderLeftWidth: "4px",
         borderLeftColor: color,
-        transform: `rotate(${rotation}deg)`,
       }}
     >
       {/* Content */}
