@@ -89,32 +89,28 @@ function SpinningWheel({
         ctx.stroke();
         ctx.restore();
 
-        // Text
+        // Text — oriented radially (reading outward from center)
         ctx.save();
         const textAngle = startAngle + segmentAngle / 2;
-        const textRadius = radius * 0.62;
-        ctx.translate(
-          cx + Math.cos(textAngle) * textRadius,
-          cy + Math.sin(textAngle) * textRadius
-        );
-        ctx.rotate(textAngle + Math.PI / 2);
+        ctx.translate(cx, cy);
+        ctx.rotate(textAngle);
 
         // Text styling
-        const fontSize = Math.max(11, Math.min(16, 280 / entries.length));
+        const fontSize = Math.max(9, Math.min(14, 200 / entries.length));
         ctx.font = `600 ${fontSize}px "Plus Jakarta Sans", sans-serif`;
         ctx.fillStyle = "#e8e4df";
-        ctx.textAlign = "center";
+        ctx.textAlign = "right";
         ctx.textBaseline = "middle";
         ctx.shadowColor = "rgba(0,0,0,0.6)";
         ctx.shadowBlur = 4;
 
         // Truncate long names
-        const maxWidth = radius * 0.55;
+        const maxWidth = radius * 0.52;
         let displayName = entry.name;
         while (ctx.measureText(displayName).width > maxWidth && displayName.length > 3) {
           displayName = displayName.slice(0, -2) + "\u2026";
         }
-        ctx.fillText(displayName, 0, 0);
+        ctx.fillText(displayName, radius - 12, 0);
         ctx.restore();
       });
 
@@ -173,7 +169,7 @@ function SpinningWheel({
 
     // Set up HiDPI
     const dpr = window.devicePixelRatio || 1;
-    const displaySize = 380;
+    const displaySize = 480;
     canvas.width = displaySize * dpr;
     canvas.height = displaySize * dpr;
     canvas.style.width = `${displaySize}px`;
@@ -460,13 +456,13 @@ function MemberSelector({
           ))}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3" style={{ maxHeight: "400px" }}>
           <button
             onClick={() => {
               setSelectedTeamId(null);
               setSelectedMembers(new Set());
             }}
-            className="text-xs transition-colors"
+            className="text-xs transition-colors shrink-0"
             style={{ color: "#7a736d" }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "#e8e4df")}
             onMouseLeave={(e) => (e.currentTarget.style.color = "#7a736d")}
@@ -474,7 +470,7 @@ function MemberSelector({
             &larr; {selectedTeam.name}
           </button>
 
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 overflow-y-auto min-h-0 flex-1 pr-1">
             {selectedTeam.members.map((member) => {
               const isSelected = selectedMembers.has(member.id);
               return (
@@ -509,7 +505,7 @@ function MemberSelector({
           <button
             onClick={handleStart}
             disabled={selectedMembers.size < 2}
-            className="w-full py-2.5 rounded-full font-display font-bold text-sm tracking-wide transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+            className="w-full py-2.5 rounded-full font-display font-bold text-sm tracking-wide transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed shrink-0"
             style={{
               background:
                 selectedMembers.size >= 2
@@ -620,7 +616,7 @@ export function WheelOfMisfortuneButton({
       />
 
       <div
-        className="relative flex flex-col items-center p-8 rounded-2xl max-w-lg w-full mx-4 animate-slide-up"
+        className="relative flex flex-col items-center p-8 rounded-2xl max-w-2xl w-full mx-4 animate-slide-up"
         style={{
           background: "linear-gradient(180deg, #120a1e 0%, #0d0815 100%)",
           border: `1px solid ${GOLD}15`,
