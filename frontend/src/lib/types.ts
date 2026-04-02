@@ -92,6 +92,19 @@ export interface Template {
 
 export type SortMode = "newest" | "most-votes";
 
+// --- Team types ---
+
+export interface TeamMember {
+  id: string;
+  name: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  members: TeamMember[];
+}
+
 // --- Admin types ---
 
 export interface GlobalStats {

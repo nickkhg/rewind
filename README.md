@@ -33,7 +33,8 @@ No accounts needed. The facilitator creates a board, shares a link, and the team
 - **Share link** — one-click copy to clipboard
 - **Dark mode** — light and dark themes with system preference detection
 - **Desktop app** — native macOS window via Tauri v2 with `rewind://` deep links
-- **Admin CMS** — view all boards and manage templates (see below)
+- **Wheel of Misfortune** — facilitators can spin a carnival-themed wheel to randomly pick who runs the next retro. Select a whole team or individual members, spin the wheel, and accept the result to auto-create a ticket in the last column
+- **Admin CMS** — view all boards and manage templates and teams (see below)
 
 <p align="center">
   <img src="docs/screenshots/home.png" alt="Home page — create a board" width="560" />
@@ -262,7 +263,8 @@ Alternatively, use an `env_file:` — `.env` files don't need escaping.
 3. The dashboard shows global stats (boards, tickets, votes, online users) and a board table
 4. Click a board row to see its detail panel (columns, facilitator token, blur state)
 5. Switch to the **Templates** tab to create, edit, or delete board templates
-6. Delete boards from the table or detail panel (with confirmation dialog)
+6. Switch to the **Teams** tab to manage teams for the Wheel of Misfortune
+7. Delete boards from the table or detail panel (with confirmation dialog)
 
 ### API Endpoints
 
@@ -279,6 +281,11 @@ All admin endpoints require `Authorization: Bearer <plaintext-token>`.
 | `POST` | `/api/admin/templates` | Create a template |
 | `PUT` | `/api/admin/templates/:id` | Update a template |
 | `DELETE` | `/api/admin/templates/:id` | Delete a template |
+| `GET` | `/api/admin/teams` | List all teams |
+| `POST` | `/api/admin/teams` | Create a team |
+| `PUT` | `/api/admin/teams/:id` | Update a team |
+| `DELETE` | `/api/admin/teams/:id` | Delete a team |
+| `GET` | `/api/teams` | List all teams (public, for board owners) |
 
 ## Design
 

@@ -52,6 +52,7 @@ async fn main() {
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))
         .route("/api/my-boards", get(routes::boards::my_boards))
+        .route("/api/teams", get(routes::boards::list_teams))
         .route("/ws/boards/{id}", get(routes::ws::ws_handler))
         .route("/api/admin/verify", post(routes::admin::verify_token))
         .route("/api/admin/stats", get(routes::admin::global_stats))
@@ -67,6 +68,14 @@ async fn main() {
         .route(
             "/api/admin/templates/{id}",
             put(routes::admin::update_template).delete(routes::admin::delete_template),
+        )
+        .route(
+            "/api/admin/teams",
+            get(routes::admin::list_teams).post(routes::admin::create_team),
+        )
+        .route(
+            "/api/admin/teams/{id}",
+            put(routes::admin::update_team).delete(routes::admin::delete_team),
         );
 
     // Serve frontend static files if STATIC_DIR is set (production)

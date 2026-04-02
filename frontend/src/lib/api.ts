@@ -3,6 +3,7 @@ import type {
   CreateBoardResponse,
   MyBoardSummary,
   Template,
+  Team,
   GlobalStats,
   AdminBoardSummary,
   AdminBoardDetail,
@@ -120,6 +121,57 @@ export async function updateAdminTemplate(
 
 export async function deleteAdminTemplate(token: string, id: string): Promise<void> {
   const res = await fetch(`${getServerUrl()}/api/admin/templates/${id}`, {
+    method: "DELETE",
+    headers: adminHeaders(token),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+// --- Teams (public) ---
+
+export async function fetchTeams(): Promise<Team[]> {
+  const res = await fetch(`${getServerUrl()}/api/teams`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// --- Admin Teams ---
+
+export async function fetchAdminTeams(token: string): Promise<Team[]> {
+  const res = await fetch(`${getServerUrl()}/api/admin/teams`, {
+    headers: adminHeaders(token),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function createAdminTeam(
+  token: string,
+  team: { name: string; members: string[] },
+): Promise<void> {
+  const res = await fetch(`${getServerUrl()}/api/admin/teams`, {
+    method: "POST",
+    headers: { ...adminHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify(team),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function updateAdminTeam(
+  token: string,
+  id: string,
+  team: { name: string; members: string[] },
+): Promise<void> {
+  const res = await fetch(`${getServerUrl()}/api/admin/teams/${id}`, {
+    method: "PUT",
+    headers: { ...adminHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify(team),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function deleteAdminTeam(token: string, id: string): Promise<void> {
+  const res = await fetch(`${getServerUrl()}/api/admin/teams/${id}`, {
     method: "DELETE",
     headers: adminHeaders(token),
   });

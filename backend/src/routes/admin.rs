@@ -265,6 +265,89 @@ pub async fn delete_template(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+// --- Team management ---
+
+pub async fn list_teams(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<crate::models::Team>>, AppError> {
+    let teams = db::list_teams(&state.db).await?;
+    Ok(Json(teams))
+}
+
+#[derive(Deserialize)]
+pub struct CreateTeamRequest {
+    pub name: String,
+    pub members: Vec<String>,
+}
+
+pub async fn create_team(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Json(req): Json<CreateTeamRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if req.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Team name is required".to_string()));
+    }
+    if req.members.is_empty() {
+        return Err(AppError::BadRequest(
+            "At least one member is required".to_string(),
+        ));
+    }
+    let id = nanoid::nanoid!(8);
+    let members: Vec<(String, String)> = req
+        .members
+        .iter()
+        .map(|name| (nanoid::nanoid!(8), name.clone()))
+        .collect();
+    db::create_team(&state.db, &id, req.name.trim(), &members).await?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTeamRequest {
+    pub name: String,
+    pub members: Vec<String>,
+}
+
+pub async fn update_team(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    Json(req): Json<UpdateTeamRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    if req.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Team name is required".to_string()));
+    }
+    if req.members.is_empty() {
+        return Err(AppError::BadRequest(
+            "At least one member is required".to_string(),
+        ));
+    }
+    let members: Vec<(String, String)> = req
+        .members
+        .iter()
+        .map(|name| (nanoid::nanoid!(8), name.clone()))
+        .collect();
+    let updated = db::update_team(&state.db, &team_id, req.name.trim(), &members).await?;
+    if !updated {
+        return Err(AppError::NotFound("Team not found".to_string()));
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+pub async fn delete_team(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let deleted = db::delete_team(&state.db, &team_id).await?;
+    if !deleted {
+        return Err(AppError::NotFound("Team not found".to_string()));
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 pub async fn delete_board(
     _auth: AdminAuth,
     State(state): State<AppState>,
