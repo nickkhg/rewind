@@ -422,6 +422,12 @@ async fn handle_message(
             source_ticket_id,
             target_ticket_id,
         } => {
+            // Block merges while the board is blurred to prevent leaking card contents
+            match db::get_blur_state(&state.db, board_id).await {
+                Ok(Some(true)) => return false,
+                _ => {}
+            }
+
             match db::merge_tickets(&state.db, &source_ticket_id, &target_ticket_id).await {
                 Ok(Some(snapshot)) => {
                     let mut merges = state.last_merge.write().await;

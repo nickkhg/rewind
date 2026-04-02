@@ -7,10 +7,11 @@ interface DraggableTicketProps {
   color: string;
   columnId: string;
   voteLimitReached?: boolean;
+  isBlurred?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function DraggableTicket({ ticket, color, columnId, voteLimitReached, send }: DraggableTicketProps) {
+export function DraggableTicket({ ticket, color, columnId, voteLimitReached, isBlurred, send }: DraggableTicketProps) {
   const {
     attributes,
     listeners,
@@ -19,11 +20,13 @@ export function DraggableTicket({ ticket, color, columnId, voteLimitReached, sen
   } = useDraggable({
     id: ticket.id,
     data: { type: "ticket", ticket, columnId },
+    disabled: isBlurred,
   });
 
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `drop-${ticket.id}`,
     data: { type: "merge", ticketId: ticket.id, columnId },
+    disabled: isBlurred,
   });
 
   return (
