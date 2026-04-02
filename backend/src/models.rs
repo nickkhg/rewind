@@ -112,6 +112,21 @@ pub struct Template {
     pub columns: Vec<String>,
 }
 
+// --- Teams ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Team {
+    pub id: String,
+    pub name: String,
+    pub members: Vec<TeamMember>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamMember {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateBoardRequest {
     pub title: String,

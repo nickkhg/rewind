@@ -92,6 +92,13 @@ pub async fn list_templates(
     Ok(Json(templates))
 }
 
+pub async fn list_teams(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<crate::models::Team>>, AppError> {
+    let teams = db::list_teams(&state.db).await?;
+    Ok(Json(teams))
+}
+
 pub async fn my_boards(
     State(state): State<AppState>,
     jar: CookieJar,

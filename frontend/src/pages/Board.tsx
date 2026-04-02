@@ -15,6 +15,7 @@ import { BoardHeader } from "../components/board/BoardHeader";
 import { Column } from "../components/board/Column";
 import { TicketCard } from "../components/board/Ticket";
 import { MergeUndoToast } from "../components/board/MergeUndoToast";
+import { WheelOfMisfortuneButton } from "../components/board/WheelOfMisfortune";
 import { COLUMN_COLORS } from "../lib/types";
 import type { Ticket } from "../lib/types";
 import { AppShell } from "../components/layout/AppShell";
@@ -25,6 +26,7 @@ export default function Board() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const board = useBoardStore((s) => s.board);
+  const isFacilitator = useBoardStore((s) => s.isFacilitator);
   const reset = useBoardStore((s) => s.reset);
   const setPendingUndo = useBoardStore((s) => s.setPendingUndo);
 
@@ -207,6 +209,12 @@ export default function Board() {
         </DragOverlay>
       </DndContext>
       <MergeUndoToast send={send} />
+      {isFacilitator && (
+        <WheelOfMisfortuneButton
+          send={send}
+          boardColumns={board.columns.map((c) => ({ id: c.id, name: c.name }))}
+        />
+      )}
     </AppShell>
   );
 }

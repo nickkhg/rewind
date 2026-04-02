@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Logo } from "../components/layout/Logo";
-import type { AdminBoardDetail, AdminBoardSummary, GlobalStats, Template } from "../lib/types";
+import type { AdminBoardDetail, AdminBoardSummary, GlobalStats, Team, Template } from "../lib/types";
 import {
   createAdminTemplate,
+  createAdminTeam,
   deleteAdminBoard,
+  deleteAdminTeam,
   deleteAdminTemplate,
   fetchAdminBoardDetail,
   fetchAdminBoards,
   fetchAdminStats,
+  fetchAdminTeams,
   fetchAdminTemplates,
+  updateAdminTeam,
   updateAdminTemplate,
   verifyAdminToken,
 } from "../lib/api";
@@ -421,6 +425,240 @@ function TemplatesPanel({
   );
 }
 
+// --- Teams components ---
+
+function TeamForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial?: Team;
+  onSave: (data: { name: string; members: string[] }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [members, setMembers] = useState<string[]>(
+    initial?.members.map((m) => m.name) ?? [""]
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const isEdit = !!initial;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    const trimmedMembers = members.map((m) => m.trim()).filter(Boolean);
+    if (!name.trim()) return setError("Team name is required");
+    if (trimmedMembers.length === 0) return setError("At least one member is required");
+    setSaving(true);
+    try {
+      await onSave({ name: name.trim(), members: trimmedMembers });
+      onCancel();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="bg-surface border border-border rounded-lg p-5 space-y-4">
+      <h3 className="font-display font-semibold text-sm">{isEdit ? "Edit team" : "New team"}</h3>
+
+      <div>
+        <label className="block text-xs text-muted mb-1">Team name</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Engineering"
+          className="w-full rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
+          autoFocus
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-muted mb-1">Members</label>
+        <div className="space-y-1.5">
+          {members.map((member, i) => (
+            <div key={i} className="flex gap-2">
+              <input
+                type="text"
+                value={member}
+                onChange={(e) => setMembers((prev) => prev.map((m, j) => (j === i ? e.target.value : m)))}
+                placeholder={`Member ${i + 1}`}
+                className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
+              />
+              {members.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => setMembers((prev) => prev.filter((_, j) => j !== i))}
+                  className="px-2 text-muted hover:text-ink transition-colors"
+                >
+                  &times;
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setMembers((prev) => [...prev, ""])}
+          className="mt-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
+        >
+          + Add member
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={saving}
+          className="text-sm bg-accent text-white px-4 py-1.5 rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50"
+        >
+          {saving ? "Saving..." : isEdit ? "Update" : "Create"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="text-sm border border-border px-4 py-1.5 rounded-lg hover:bg-canvas transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function TeamsPanel({
+  teams,
+  onReload,
+  getToken,
+}: {
+  teams: Team[];
+  onReload: () => void;
+  getToken: () => string;
+}) {
+  const [editing, setEditing] = useState<Team | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Team | null>(null);
+
+  async function handleCreate(data: { name: string; members: string[] }) {
+    await createAdminTeam(getToken(), data);
+    setCreating(false);
+    onReload();
+  }
+
+  async function handleUpdate(data: { name: string; members: string[] }) {
+    if (!editing) return;
+    await updateAdminTeam(getToken(), editing.id, data);
+    setEditing(null);
+    onReload();
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    try {
+      await deleteAdminTeam(getToken(), deleteTarget.id);
+      setDeleteTarget(null);
+      onReload();
+    } catch {
+      setDeleteTarget(null);
+      onReload();
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-surface border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h2 className="font-display font-semibold text-sm">Teams ({teams.length})</h2>
+          <button
+            onClick={() => { setCreating(true); setEditing(null); }}
+            className="text-xs text-accent hover:text-accent-hover transition-colors"
+          >
+            + New team
+          </button>
+        </div>
+
+        {teams.length === 0 ? (
+          <div className="px-4 py-8 text-center text-sm text-muted">No teams yet</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted border-b border-border">
+                  <th className="px-4 py-2 font-medium">Name</th>
+                  <th className="px-4 py-2 font-medium">Members</th>
+                  <th className="px-4 py-2 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {teams.map((t) => (
+                  <tr key={t.id} className="border-b border-border last:border-b-0 hover:bg-canvas transition-colors">
+                    <td className="px-4 py-2.5 font-medium">{t.name}</td>
+                    <td className="px-4 py-2.5 text-muted">
+                      <div className="flex flex-wrap gap-1">
+                        {t.members.map((m) => (
+                          <span key={m.id} className="text-xs bg-canvas border border-border rounded px-1.5 py-0.5">
+                            {m.name}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => { setEditing(t); setCreating(false); }}
+                          className="text-xs text-accent hover:text-accent-hover transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(t)}
+                          className="text-xs text-red-500 hover:text-red-700 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {creating && (
+        <TeamForm
+          onSave={handleCreate}
+          onCancel={() => setCreating(false)}
+        />
+      )}
+
+      {editing && (
+        <TeamForm
+          initial={editing}
+          onSave={handleUpdate}
+          onCancel={() => setEditing(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteConfirmDialog
+          boardTitle={`team "${deleteTarget.name}"`}
+          onConfirm={handleDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 // --- Main component ---
 
 export default function Admin() {
@@ -436,8 +674,9 @@ export default function Admin() {
   const [detail, setDetail] = useState<AdminBoardDetail | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminBoardSummary | null>(null);
   const [loadingData, setLoadingData] = useState(false);
-  const [tab, setTab] = useState<"boards" | "templates">("boards");
+  const [tab, setTab] = useState<"boards" | "templates" | "teams">("boards");
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
 
   const getToken = useCallback(() => {
     return sessionStorage.getItem(STORAGE_KEY) ?? "";
@@ -446,14 +685,16 @@ export default function Admin() {
   const loadDashboard = useCallback(async (t: string) => {
     setLoadingData(true);
     try {
-      const [s, b, tpls] = await Promise.all([
+      const [s, b, tpls, tms] = await Promise.all([
         fetchAdminStats(t),
         fetchAdminBoards(t),
         fetchAdminTemplates(t),
+        fetchAdminTeams(t),
       ]);
       setStats(s);
       setBoards(b);
       setTemplates(tpls);
+      setTeams(tms);
     } catch {
       // Token may have expired
       sessionStorage.removeItem(STORAGE_KEY);
@@ -627,7 +868,7 @@ export default function Admin() {
 
         {/* Tab switcher */}
         <div className="flex gap-1 mb-4 border-b border-border">
-          {(["boards", "templates"] as const).map((t) => (
+          {(["boards", "templates", "teams"] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -744,6 +985,14 @@ export default function Admin() {
         {tab === "templates" && (
           <TemplatesPanel
             templates={templates}
+            onReload={() => loadDashboard(getToken())}
+            getToken={getToken}
+          />
+        )}
+
+        {tab === "teams" && (
+          <TeamsPanel
+            teams={teams}
             onReload={() => loadDashboard(getToken())}
             getToken={getToken}
           />

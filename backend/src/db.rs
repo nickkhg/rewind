@@ -910,6 +910,117 @@ pub async fn remove_editor(
     Ok(result.rows_affected() > 0)
 }
 
+// --- Teams ---
+
+pub async fn list_teams(pool: &PgPool) -> Result<Vec<crate::models::Team>, sqlx::Error> {
+    let team_rows = sqlx::query_as::<_, TeamRow>("SELECT id, name FROM teams ORDER BY name")
+        .fetch_all(pool)
+        .await?;
+
+    let member_rows = sqlx::query_as::<_, TeamMemberRow>(
+        "SELECT id, team_id, name FROM team_members ORDER BY position",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut teams: Vec<crate::models::Team> = team_rows
+        .into_iter()
+        .map(|t| crate::models::Team {
+            id: t.id,
+            name: t.name,
+            members: Vec::new(),
+        })
+        .collect();
+
+    for m in member_rows {
+        if let Some(team) = teams.iter_mut().find(|t| t.id == m.team_id) {
+            team.members.push(crate::models::TeamMember {
+                id: m.id,
+                name: m.name,
+            });
+        }
+    }
+
+    Ok(teams)
+}
+
+pub async fn create_team(
+    pool: &PgPool,
+    id: &str,
+    name: &str,
+    members: &[(String, String)], // (id, name)
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("INSERT INTO teams (id, name) VALUES ($1, $2)")
+        .bind(id)
+        .bind(name)
+        .execute(&mut *tx)
+        .await?;
+
+    for (pos, (member_id, member_name)) in members.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO team_members (id, team_id, name, position) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(member_id)
+        .bind(id)
+        .bind(member_name)
+        .bind(pos as i32)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn update_team(
+    pool: &PgPool,
+    id: &str,
+    name: &str,
+    members: &[(String, String)],
+) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let result = sqlx::query("UPDATE teams SET name = $1 WHERE id = $2")
+        .bind(name)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Ok(false);
+    }
+
+    sqlx::query("DELETE FROM team_members WHERE team_id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    for (pos, (member_id, member_name)) in members.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO team_members (id, team_id, name, position) VALUES ($1, $2, $3, $4)",
+        )
+        .bind(member_id)
+        .bind(id)
+        .bind(member_name)
+        .bind(pos as i32)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(true)
+}
+
+pub async fn delete_team(pool: &PgPool, id: &str) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM teams WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // --- Row types for query_as ---
 
 #[derive(sqlx::FromRow)]
@@ -1041,4 +1152,17 @@ struct EditorRow {
 struct EditorRequestRow {
     participant_id: String,
     participant_name: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct TeamRow {
+    id: String,
+    name: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct TeamMemberRow {
+    id: String,
+    team_id: String,
+    name: String,
 }
