@@ -15,6 +15,7 @@ export function Column({ column, color, send }: ColumnProps) {
   const participantId = useBoardStore((s) => s.participantId);
   const voteLimit = useBoardStore((s) => s.board?.vote_limit_per_column ?? null);
   const hideVotes = useBoardStore((s) => s.board?.hide_votes ?? false);
+  const isBlurred = useBoardStore((s) => s.board?.is_blurred ?? false);
   const effectiveSortMode = hideVotes ? "newest" : sortMode;
   const sorted = sortTickets(column.tickets, effectiveSortMode);
 
@@ -54,6 +55,7 @@ export function Column({ column, color, send }: ColumnProps) {
             color={color}
             columnId={column.id}
             voteLimitReached={voteLimitReached}
+            isBlurred={isBlurred}
             send={send}
           />
         ))}
