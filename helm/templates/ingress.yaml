@@ -1,0 +1,56 @@
+{{- if .Values.ingress.enabled -}}
+{{- $tlsMode := .Values.ingress.tls.mode -}}
+{{- $tlsSecret := include "rewind.tlsSecretName" . -}}
+{{- $fullname := include "rewind.fullname" . -}}
+
+{{- $annotations := dict -}}
+{{- range $k, $v := .Values.ingress.annotations -}}
+{{- $_ := set $annotations $k $v -}}
+{{- end -}}
+
+{{- if eq $tlsMode "certManager" -}}
+{{- $issuerAnnotation := "cert-manager.io/cluster-issuer" -}}
+{{- if eq .Values.ingress.tls.certManager.issuerKind "Issuer" -}}
+{{- $issuerAnnotation = "cert-manager.io/issuer" -}}
+{{- end -}}
+{{- $_ := set $annotations $issuerAnnotation .Values.ingress.tls.certManager.issuer -}}
+{{- end -}}
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "rewind.labels" . | nindent 4 }}
+  {{- if $annotations }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- if ne $tlsMode "none" }}
+  tls:
+    - secretName: {{ $tlsSecret }}
+      hosts:
+        {{- range .Values.ingress.hosts }}
+        - {{ .host | quote }}
+        {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $fullname }}
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- end }}

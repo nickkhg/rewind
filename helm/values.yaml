@@ -1,0 +1,74 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/your-org/rewind
+  tag: "1.6.1"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3001
+
+ingress:
+  enabled: false
+  className: ""
+  # Extra annotations merged onto the Ingress resource.
+  # cert-manager annotations are added automatically when tls.mode=certManager.
+  annotations: {}
+  hosts:
+    - host: rewind.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    # mode controls how TLS is provisioned. Options:
+    #   none          — no TLS (plain HTTP ingress)
+    #   certManager   — cert-manager issues and renews the certificate
+    #   existingSecret — reference a pre-existing kubernetes.io/tls Secret
+    #   manual        — provide the PEM cert+key directly in values
+    mode: none
+
+    certManager:
+      # Name of the ClusterIssuer or Issuer cert-manager should use.
+      issuer: letsencrypt-prod
+      # ClusterIssuer (cluster-wide) or Issuer (namespace-scoped).
+      issuerKind: ClusterIssuer
+      # Name of the TLS Secret cert-manager will create.
+      # Defaults to <fullname>-tls if left empty.
+      secretName: ""
+
+    existingSecret:
+      # Name of a pre-existing kubernetes.io/tls Secret in the same namespace.
+      name: ""
+
+    manual:
+      # PEM-encoded certificate (including any intermediates).
+      cert: ""
+      # PEM-encoded private key.
+      key: ""
+      # Name of the TLS Secret to create.
+      # Defaults to <fullname>-tls if left empty.
+      secretName: ""
+
+resources: {}
+
+# Plaintext secrets — the init container hashes adminToken via hash_admin_token
+secrets:
+  # Plaintext admin token; leave empty to disable the admin interface
+  adminToken: ""
+
+env:
+  port: "3001"
+  rustLog: "info"
+
+postgres:
+  image:
+    repository: postgres
+    tag: "17-alpine"
+  auth:
+    username: rewind
+    password: "changeme"
+    database: rewind
+  storage:
+    size: 1Gi
+  resources: {}

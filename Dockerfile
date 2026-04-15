@@ -20,13 +20,16 @@ COPY backend/ backend/
 WORKDIR /app/backend
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/backend/target \
-    cargo build --release && cp target/release/rewind-backend /rewind-backend
+    cargo build --release && \
+    cp target/release/rewind-backend /rewind-backend && \
+    cp target/release/hash_admin_token /hash_admin_token
 
 # --- Runtime ---
 FROM alpine:3.21
 RUN adduser -D rewind
 
 COPY --from=backend /rewind-backend /usr/local/bin/rewind
+COPY --from=backend /hash_admin_token /usr/local/bin/hash_admin_token
 COPY --from=frontend /app/frontend/dist /srv/static
 
 USER rewind
