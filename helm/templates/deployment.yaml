@@ -16,6 +16,10 @@ spec:
       labels:
         {{- include "rewind.selectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         # Shared memory between init container and main container.
         # The init container writes the Argon2 hash here; the main
@@ -71,11 +75,28 @@ spec:
               fi
               exec /usr/local/bin/rewind
           env:
-            - name: DATABASE_URL
+            - name: POSTGRES_HOST
               valueFrom:
                 secretKeyRef:
                   name: {{ include "rewind.fullname" . }}
-                  key: database-url
+                  key: postgres-host
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: postgres-username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: postgres-password
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: postgres-database
+            - name: DATABASE_URL
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):5432/$(POSTGRES_DB)"
             - name: PORT
               value: {{ .Values.env.port | quote }}
             - name: STATIC_DIR

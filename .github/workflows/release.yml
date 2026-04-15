@@ -110,7 +110,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-binary
-          path: target/x86_64-unknown-linux-musl/release/rewind-backend
+          path: |
+            target/x86_64-unknown-linux-musl/release/rewind-backend
+            target/x86_64-unknown-linux-musl/release/hash_admin_token
           if-no-files-found: error
 
   # ─── Frontend Static Assets ────────────────────────────────────────────
@@ -166,7 +168,7 @@ jobs:
 
       - name: Prepare Docker context
         run: |
-          chmod +x rewind-backend
+          chmod +x rewind-backend hash_admin_token
           mkdir -p frontend-dist
           tar -xzf frontend-dist.tar.gz -C frontend-dist
 
