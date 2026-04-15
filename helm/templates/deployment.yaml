@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rewind.fullname" . }}
+  labels:
+    {{- include "rewind.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "rewind.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+      labels:
+        {{- include "rewind.selectorLabels" . | nindent 8 }}
+    spec:
+      volumes:
+        # Shared memory between init container and main container.
+        # The init container writes the Argon2 hash here; the main
+        # container reads it and exports it as ADMIN_TOKEN_HASH.
+        - name: shared-token
+          emptyDir: {}
+
+      initContainers:
+        - name: wait-for-postgres
+          image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+          command: ['sh', '-c', 'until pg_isready -h {{ include "rewind.postgresFullname" . }} -p 5432 -U {{ .Values.postgres.auth.username }}; do echo "waiting for postgres..."; sleep 2; done']
+
+        - name: hash-admin-token
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              if [ -n "$ADMIN_TOKEN" ]; then
+                printf '%s\n' "$ADMIN_TOKEN" \
+                  | /usr/local/bin/hash_admin_token \
+                  | sed -n 's/^ADMIN_TOKEN_HASH=//p' \
+                  > /shared/admin-token-hash
+                echo "Admin token hashed successfully."
+              else
+                echo "No admin token set — admin interface will be disabled."
+                touch /shared/admin-token-hash
+              fi
+          env:
+            - name: ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: admin-token
+          volumeMounts:
+            - name: shared-token
+              mountPath: /shared
+
+      containers:
+        - name: rewind
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Read the hashed token written by the init container and
+          # export it before handing off to the server binary.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              HASH=$(cat /shared/admin-token-hash)
+              if [ -n "$HASH" ]; then
+                export ADMIN_TOKEN_HASH="$HASH"
+              fi
+              exec /usr/local/bin/rewind
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: database-url
+            - name: PORT
+              value: {{ .Values.env.port | quote }}
+            - name: STATIC_DIR
+              value: "/srv/static"
+            - name: RUST_LOG
+              value: {{ .Values.env.rustLog | quote }}
+          volumeMounts:
+            - name: shared-token
+              mountPath: /shared
+          ports:
+            - name: http
+              containerPort: {{ .Values.env.port | int }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /api/templates
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/templates
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
