@@ -6,6 +6,7 @@ FROM alpine:3.21
 RUN adduser -D rewind
 
 COPY rewind-backend /usr/local/bin/rewind
+COPY hash_admin_token /usr/local/bin/hash_admin_token
 COPY frontend-dist/ /srv/static
 
 USER rewind

@@ -59,13 +59,3 @@ Returns an empty string when mode=none.
 {{- end -}}
 {{- end }}
 
-{{/*
-Construct the DATABASE_URL from postgres values.
-*/}}
-{{- define "rewind.databaseUrl" -}}
-{{- printf "postgres://%s:%s@%s:5432/%s"
-    .Values.postgres.auth.username
-    .Values.postgres.auth.password
-    (include "rewind.postgresFullname" .)
-    .Values.postgres.auth.database }}
-{{- end }}
