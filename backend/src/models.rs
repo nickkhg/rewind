@@ -49,7 +49,21 @@ pub struct Ticket {
     pub created_at: DateTime<Utc>,
     pub carried_from_board_id: Option<String>,
     pub carried_from_board_title: Option<String>,
+    pub comments: Vec<Comment>,
 }
+
+/// A remark on one card. It changes neither the text of the card nor its votes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Comment {
+    pub id: String,
+    pub content: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// The most characters that one comment can hold.
+pub const MAX_COMMENT_LENGTH: usize = 500;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Participant {

@@ -4,8 +4,8 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 
 use crate::models::{
-    ActionSourceBoard, Board, Column, EditorRequestView, EditorView, ImportResult, LabelCount,
-    Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
+    ActionSourceBoard, Board, Column, Comment, EditorRequestView, EditorView, ImportResult,
+    LabelCount, Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
 };
 use crate::state::MergeSnapshot;
 
@@ -131,6 +131,18 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         .await?
     };
 
+    // Fetch all comments for all tickets in one query
+    let comment_rows = if ticket_ids.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, CommentRow>(
+            "SELECT id, ticket_id, content, author_id, author_name, created_at FROM ticket_comments WHERE ticket_id = ANY($1) ORDER BY created_at",
+        )
+        .bind(&ticket_ids)
+        .fetch_all(pool)
+        .await?
+    };
+
     // Group votes by ticket_id
     let mut votes_map: std::collections::HashMap<String, HashSet<String>> =
         std::collections::HashMap::new();
@@ -141,11 +153,25 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             .insert(v.participant_id);
     }
 
+    // Group comments by ticket_id. They keep the order of the query: oldest first.
+    let mut comments_map: std::collections::HashMap<String, Vec<Comment>> =
+        std::collections::HashMap::new();
+    for c in comment_rows {
+        comments_map.entry(c.ticket_id).or_default().push(Comment {
+            id: c.id,
+            content: c.content,
+            author_id: c.author_id,
+            author_name: c.author_name,
+            created_at: c.created_at,
+        });
+    }
+
     // Group tickets by column_id
     let mut tickets_map: std::collections::HashMap<String, Vec<Ticket>> =
         std::collections::HashMap::new();
     for t in ticket_rows {
         let votes = votes_map.remove(&t.id).unwrap_or_default();
+        let comments = comments_map.remove(&t.id).unwrap_or_default();
         tickets_map.entry(t.column_id.clone()).or_default().push(Ticket {
             id: t.id,
             content: t.content,
@@ -155,6 +181,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             created_at: t.created_at,
             carried_from_board_id: t.carried_from_board_id,
             carried_from_board_title: t.carried_from_board_title,
+            comments,
         });
     }
 
@@ -409,6 +436,88 @@ pub async fn get_ticket_author(
     Ok(row.map(|r| r.author_id))
 }
 
+/// Tells whether a card sits on one of the columns of this board.
+pub async fn ticket_belongs_to_board(
+    pool: &PgPool,
+    ticket_id: &str,
+    board_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM tickets t JOIN columns c ON c.id = t.column_id WHERE t.id = $1 AND c.board_id = $2",
+    )
+    .bind(ticket_id)
+    .bind(board_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count > 0)
+}
+
+// --- Comments ---
+
+pub async fn add_comment(
+    pool: &PgPool,
+    comment_id: &str,
+    ticket_id: &str,
+    content: &str,
+    author_id: &str,
+    author_name: &str,
+    created_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO ticket_comments (id, ticket_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(comment_id)
+    .bind(ticket_id)
+    .bind(content)
+    .bind(author_id)
+    .bind(author_name)
+    .bind(created_at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn edit_comment(
+    pool: &PgPool,
+    comment_id: &str,
+    content: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE ticket_comments SET content = $1 WHERE id = $2")
+        .bind(content)
+        .bind(comment_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+pub async fn remove_comment(pool: &PgPool, comment_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM ticket_comments WHERE id = $1")
+        .bind(comment_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Gives the author of a comment, but only if the comment is on a card of this board.
+/// A caller from a different board gets None, and with it no permission to act.
+pub async fn get_comment_author_on_board(
+    pool: &PgPool,
+    comment_id: &str,
+    board_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query_as::<_, AuthorRow>(
+        "SELECT cm.author_id FROM ticket_comments cm \
+         JOIN tickets t ON t.id = cm.ticket_id \
+         JOIN columns c ON c.id = t.column_id \
+         WHERE cm.id = $1 AND c.board_id = $2",
+    )
+    .bind(comment_id)
+    .bind(board_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| r.author_id))
+}
+
 // --- Votes ---
 
 pub async fn toggle_vote(
@@ -471,6 +580,15 @@ pub async fn merge_tickets(
             .await?;
     let source_vote_ids: Vec<String> = source_votes.iter().map(|v| v.participant_id.clone()).collect();
 
+    // The comments of the source card follow their text onto the target card.
+    let source_comments = sqlx::query_as::<_, CommentIdRow>(
+        "SELECT id FROM ticket_comments WHERE ticket_id = $1",
+    )
+    .bind(source_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let source_comment_ids: Vec<String> = source_comments.into_iter().map(|r| r.id).collect();
+
     // Combined content
     let combined = format!("{}\n---\n{}", target.content, source.content);
 
@@ -486,6 +604,15 @@ pub async fn merge_tickets(
         sqlx::query("INSERT INTO votes (ticket_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
             .bind(target_id)
             .bind(voter_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // Move the comments across before the delete, or the cascade removes them with the card
+    if !source_comment_ids.is_empty() {
+        sqlx::query("UPDATE ticket_comments SET ticket_id = $1 WHERE ticket_id = $2")
+            .bind(target_id)
+            .bind(source_id)
             .execute(&mut *tx)
             .await?;
     }
@@ -508,6 +635,7 @@ pub async fn merge_tickets(
         source_votes: source_vote_ids,
         source_carried_from_board_id: source.carried_from_board_id,
         source_carried_from_board_title: source.carried_from_board_title,
+        source_comment_ids,
         target_id: target.id,
         target_original_content: target.content,
     }))
@@ -543,6 +671,15 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
         sqlx::query("INSERT INTO votes (ticket_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
             .bind(&snapshot.source_id)
             .bind(voter_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    // Send the comments of the source card back to it. The card exists again by now.
+    if !snapshot.source_comment_ids.is_empty() {
+        sqlx::query("UPDATE ticket_comments SET ticket_id = $1 WHERE id = ANY($2)")
+            .bind(&snapshot.source_id)
+            .bind(&snapshot.source_comment_ids)
             .execute(&mut *tx)
             .await?;
     }
@@ -1347,6 +1484,21 @@ struct TicketRow {
 struct VoteRow {
     ticket_id: String,
     participant_id: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct CommentRow {
+    id: String,
+    ticket_id: String,
+    content: String,
+    author_id: String,
+    author_name: String,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct CommentIdRow {
+    id: String,
 }
 
 #[derive(sqlx::FromRow)]

@@ -43,7 +43,20 @@ export interface Ticket {
   created_at: string;
   carried_from_board_id: string | null;
   carried_from_board_title: string | null;
+  comments: TicketComment[];
 }
+
+/** A remark on one card. It changes neither the text of the card nor its votes. */
+export interface TicketComment {
+  id: string;
+  content: string;
+  author_id: string;
+  author_name: string;
+  created_at: string;
+}
+
+/** The most characters that one comment can hold. The backend applies the same limit. */
+export const MAX_COMMENT_LENGTH = 500;
 
 export interface CreateBoardRequest {
   title: string;
@@ -83,6 +96,9 @@ export type ClientMessage =
   | { type: "RemoveTicket"; payload: { ticket_id: string } }
   | { type: "EditTicket"; payload: { ticket_id: string; content: string } }
   | { type: "MoveTicket"; payload: { ticket_id: string; column_id: string } }
+  | { type: "AddComment"; payload: { ticket_id: string; content: string } }
+  | { type: "EditComment"; payload: { comment_id: string; content: string } }
+  | { type: "RemoveComment"; payload: { comment_id: string } }
   | { type: "ToggleVote"; payload: { ticket_id: string } }
   | { type: "ToggleBlur" }
   | { type: "ToggleHideVotes" }
