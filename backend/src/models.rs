@@ -6,6 +6,18 @@ use std::collections::HashSet;
 pub const ROLE_PREVIOUS_ACTIONS: &str = "previous_actions";
 pub const ROLE_ACTIONS: &str = "actions";
 
+/// The Rocks column of a Level 10 board. Only a card in it can carry a rock status.
+/// Every other board has no column of this role, which keeps the feature where it belongs.
+pub const ROLE_ROCKS: &str = "rocks";
+
+/// The template that turns the Level 10 parts on: the scorecard, the rock status, the rating.
+pub const TEMPLATE_LEVEL10: &str = "level10";
+
+/// The two marks that a rock can carry. Anything else is refused.
+pub fn valid_rock_status(status: &str) -> bool {
+    status == "on_track" || status == "off_track"
+}
+
 /// Column names that only the two role columns can use.
 pub const RESERVED_COLUMN_NAMES: [&str; 4] = [
     "actions",
@@ -29,6 +41,11 @@ pub struct Board {
     pub vote_limit_per_column: Option<i32>,
     pub timer_end: Option<DateTime<Utc>>,
     pub labels: Vec<String>,
+    /// The template the board started from, kept as a format tag. None for a custom board.
+    pub template_id: Option<String>,
+    /// Empty on every board that is not a Level 10 board.
+    pub scorecard: Vec<ScorecardMetric>,
+    pub meeting_ratings: Vec<MeetingRatingView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,6 +68,28 @@ pub struct Ticket {
     pub carried_from_board_title: Option<String>,
     pub comments: Vec<Comment>,
     pub gif: Option<Gif>,
+    /// `on_track` or `off_track` on a card in the Rocks column. None everywhere else.
+    pub rock_status: Option<String>,
+}
+
+/// One line of the scorecard: a number the team reads each week, and how it stands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScorecardMetric {
+    pub id: String,
+    pub name: String,
+    /// Free text, because an EOS goal reads ">= 95%" or "$120k".
+    pub goal: String,
+    pub actual: String,
+    /// None until someone marks the line, then true or false.
+    pub on_track: Option<bool>,
+}
+
+/// The mark that one participant gave the meeting, from 1 to 10.
+/// The raw pairs go out, as votes do; the frontend works out the average.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingRatingView {
+    pub participant_id: String,
+    pub rating: i32,
 }
 
 /// A remark on one card. It changes neither the text of the card nor its votes.
@@ -66,6 +105,9 @@ pub struct Comment {
 
 /// The most characters that one comment can hold.
 pub const MAX_COMMENT_LENGTH: usize = 500;
+
+/// The most characters that one field of a scorecard line can hold.
+pub const MAX_SCORECARD_FIELD_LENGTH: usize = 200;
 
 /// One GIF from GIPHY, attached to a card or to a comment.
 ///
@@ -172,6 +214,9 @@ pub struct BoardView {
     pub editors: Vec<EditorView>,
     pub editor_requests: Vec<EditorRequestView>,
     pub labels: Vec<String>,
+    pub template_id: Option<String>,
+    pub scorecard: Vec<ScorecardMetric>,
+    pub meeting_ratings: Vec<MeetingRatingView>,
 }
 
 /// The letters that stand in for the words of a card that the reader may not read yet.
@@ -230,6 +275,9 @@ impl Board {
             editors,
             editor_requests,
             labels: self.labels.clone(),
+            template_id: self.template_id.clone(),
+            scorecard: self.scorecard.clone(),
+            meeting_ratings: self.meeting_ratings.clone(),
         }
     }
 }
@@ -346,6 +394,9 @@ pub struct CreateBoardRequest {
     pub is_anonymous: bool,
     #[serde(default)]
     pub labels: Vec<String>,
+    /// The template the caller picked. An old client leaves it out and gets a board with no tag.
+    #[serde(default)]
+    pub template_id: Option<String>,
 }
 
 /// The most labels that one board can carry.
@@ -461,6 +512,7 @@ mod tests {
                 gif: None,
             }],
             gif: None,
+            rock_status: None,
         }
     }
 
@@ -495,6 +547,9 @@ mod tests {
             editors: Vec::new(),
             editor_requests: Vec::new(),
             labels: Vec::new(),
+            template_id: None,
+            scorecard: Vec::new(),
+            meeting_ratings: Vec::new(),
         }
     }
 

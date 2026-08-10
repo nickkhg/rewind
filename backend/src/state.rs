@@ -24,6 +24,9 @@ pub struct MergeSnapshot {
     /// The GIF of the source card. A merge onto a card with no GIF hands this over,
     /// so the undo has to know where it came from.
     pub source_gif: Option<Gif>,
+    /// The rock status of the source card. A merge keeps the mark of the target,
+    /// so this one only comes back with the undo.
+    pub source_rock_status: Option<String>,
     pub target_id: String,
     pub target_original_content: String,
     pub target_original_gif: Option<Gif>,

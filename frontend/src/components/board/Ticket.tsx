@@ -4,6 +4,7 @@ import { useGifComposer } from "../../hooks/useGifComposer";
 import { VoteButton } from "./VoteButton";
 import { CommentThread, CommentToggle } from "./CommentThread";
 import { GifAttachment } from "./GifAttachment";
+import { RockStatusControl } from "./RockStatusControl";
 import type { Ticket as TicketType, ClientMessage, ColumnRole } from "../../lib/types";
 
 interface TicketProps {
@@ -22,6 +23,8 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
   // A carried action is a record of the last retro, not fresh input: it stays visible and it
   // takes no votes.
   const isCarried = columnRole === "previous_actions";
+  // A rock stands for the quarter, so its card carries where it stands.
+  const isRock = columnRole === "rocks";
   // A card that came from another board is already public. It stays visible after a move too.
   const fromOtherBoard = isCarried || !!ticket.carried_from_board_title;
   const isBlurred =
@@ -185,6 +188,18 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
           )}
           {/* The picture carries the point as much as the words, so it hides with them. */}
           {ticket.gif && <GifAttachment gif={ticket.gif} size="card" blurred={isBlurred} />}
+        </div>
+      )}
+
+      {/* Where the rock stands. A card you cannot read yet carries no mark you could read. */}
+      {isRock && !isBlurred && (isAuthor || isPrivileged || ticket.rock_status) && (
+        <div className="flex mt-2">
+          <RockStatusControl
+            ticketId={ticket.id}
+            status={ticket.rock_status}
+            canSet={isAuthor || isPrivileged}
+            send={send}
+          />
         </div>
       )}
 

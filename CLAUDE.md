@@ -37,7 +37,7 @@ Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri
 
 Messages are serde-tagged enums: `#[serde(tag = "type", content = "payload")]`. TypeScript mirrors this as discriminated unions in `lib/types.ts`.
 
-Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`
+Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`, `SetRockStatus`, `RateMeeting`, `AddScorecardMetric`, `UpdateScorecardMetric`, `RemoveScorecardMetric`
 Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `Error`
 
 `AddTicket`, `EditTicket`, `AddComment` and `EditComment` each carry an optional `gif`. The client sends the whole state it wants, so an edit that leaves `gif` out takes the picture off the card.
@@ -46,6 +46,8 @@ Server → Client: `BoardState` (after every mutation), `Authenticated` (after J
 
 Every board has two columns with a `role` in the `columns` table: `previous_actions` (first) and `actions` (last). A unique partial index keeps one column of each role per board. All other columns have `role = NULL` and keep their free-text names. Templates must not supply an action column — `create_board` drops a requested column that uses one of `RESERVED_COLUMN_NAMES` (`models.rs`).
 
+A third role, `rocks`, belongs to Level 10 boards alone. Only the `level10` creation path assigns it: the first requested column whose trimmed name reads "rocks", in any case, takes `ROLE_ROCKS`. The name stays free text everywhere else — `RESERVED_COLUMN_NAMES` does not hold "rocks", so the Rocks column of the Sailboat template keeps `role = NULL` and carries no rock status.
+
 The facilitator or an editor copies the actions of any other board into Previous Actions:
 
 - `GET /api/boards/{id}/action-sources?q=&labels=` lists the boards that hold at least one action card, newest first. `labels` is comma-separated and matches any.
@@ -53,6 +55,42 @@ The facilitator or an editor copies the actions of any other board into Previous
 - `PUT /api/boards/{id}/labels` and `GET /api/labels` manage the board labels. Labels are free text, kept lower case, six per board at most (`normalize_labels` in `models.rs`).
 
 REST carries these three, not the WebSocket protocol, because each one answers the caller with a result or an error. `db::is_board_privileged` applies the same rule as the WebSocket handler: facilitator token, facilitator cookie, or a place in the editor list.
+
+## Level 10 Boards
+
+`boards.template_id` holds the template the board came from, or NULL. It has no foreign key:
+`create_board` checks the id against the `templates` table once, at creation, and keeps it only if
+the row is there. From then on the value is a frozen tag, so admin CRUD can change or delete a
+template without touching the boards already made from it. `TEMPLATE_LEVEL10` (`"level10"` in
+`models.rs`) turns on the three Level 10 features; every other board carries none of them.
+`db::get_board` reads the scorecard and the ratings only for a Level 10 board, so a broadcast on a
+normal board makes no extra queries.
+
+- **The scorecard** is `scorecard_metrics(id, board_id, name, goal, actual, on_track, position)`.
+  `goal` and `actual` are text, because an EOS goal reads "≥ 95%" or "$120k". `on_track` is
+  nullable and thus three-state — on, off, or not said yet — and a person sets it, nothing computes
+  it. Only the facilitator or an editor writes it, over the WebSocket (`AddScorecardMetric`,
+  `UpdateScorecardMetric`, `RemoveScorecardMetric`), because the rebroadcast is the answer, as with
+  `SetVoteLimit`. The board id sits in the WHERE of the update and of the delete, which is what
+  keeps one board out of the scorecard of another.
+- **The rating** is `meeting_ratings(board_id, participant_id, rating)`, keyed on the pair.
+  `RateMeeting` takes 1 to 10 from any participant and replaces the mark that participant left
+  before. The raw pairs go out on `BoardState`, as the votes do, and the client works out the
+  average, the count, and which mark is yours. There is no conclude phase: the widget stays in the
+  header for the whole meeting.
+- **The rock status** is `tickets.rock_status` — `on_track`, `off_track`, or NULL. `SetRockStatus`
+  asks the author or a privileged user, and the server refuses a card that does not sit in the
+  `rocks` column of this board, which confines the feature to Level 10 boards with no second check.
+  A merge keeps the mark of the target card and puts the mark of the source in `MergeSnapshot`, so
+  the undo returns it. A split leaves the new card unmarked, and a carried action arrives unmarked,
+  because `copy_actions` names the columns it copies.
+- **None of the three is redacted.** `redact_hidden_for` masks the words of a hidden card in the
+  Rocks column as it does anywhere else, but the scorecard, the ratings and the marks go out whole.
+  The card hides its rock-status control while it is blurred for you, the rule the comment control
+  follows.
+- **The template row can go.** Delete `level10` from `templates` and a new board falls back to
+  `template_id = NULL`: no Rocks role, and the three features off. The boards already made keep
+  theirs, and nothing breaks — the next Level 10 board is a plain board with those column names.
 
 ## GIFs from GIPHY
 

@@ -22,10 +22,19 @@ export interface Board {
   editors: EditorInfo[];
   editor_requests: EditorRequest[];
   labels: string[];
+  /** The template the board started from, kept as a format tag. Null for a custom board. */
+  template_id: string | null;
+  /** Empty on every board that is not a Level 10 board. */
+  scorecard: ScorecardMetric[];
+  /** One mark per participant who rated the meeting. The average is worked out here. */
+  meeting_ratings: MeetingRating[];
 }
 
-/** Every board has one column of each role. The other columns have no role. */
-export type ColumnRole = "previous_actions" | "actions";
+/**
+ * Every board has a Previous Actions column and an Actions column. Only a Level 10 board has a
+ * Rocks column. Every other column has no role.
+ */
+export type ColumnRole = "previous_actions" | "actions" | "rocks";
 
 export interface Column {
   id: string;
@@ -45,6 +54,28 @@ export interface Ticket {
   carried_from_board_title: string | null;
   comments: TicketComment[];
   gif: Gif | null;
+  /** Where the rock stands. Null on every card outside the Rocks column. */
+  rock_status: RockStatus | null;
+}
+
+/** Where a rock stands. Null until someone marks it. */
+export type RockStatus = "on_track" | "off_track";
+
+/** One line of the scorecard: a number the team reads each week, and how it stands. */
+export interface ScorecardMetric {
+  id: string;
+  name: string;
+  /** Free text, because an EOS goal reads ">= 95%" or "$120k". */
+  goal: string;
+  actual: string;
+  /** Null until someone marks the line, then true or false. */
+  on_track: boolean | null;
+}
+
+/** The mark that one participant gave the meeting, from 1 to 10. */
+export interface MeetingRating {
+  participant_id: string;
+  rating: number;
 }
 
 /** A remark on one card. It changes neither the text of the card nor its votes. */
@@ -76,6 +107,17 @@ export interface Gif {
 /** The most characters that one comment can hold. The backend applies the same limit. */
 export const MAX_COMMENT_LENGTH = 500;
 
+/** The most characters that one field of a scorecard line can hold. Same limit on the backend. */
+export const MAX_SCORECARD_FIELD_LENGTH = 200;
+
+/** The template that turns the Level 10 parts on: the scorecard, the rock status, the rating. */
+export const LEVEL10_TEMPLATE_ID = "level10";
+
+/** True when the board runs an EOS Level 10 meeting and carries its extra parts. */
+export function isLevel10(board: Board | null | undefined): boolean {
+  return board?.template_id === LEVEL10_TEMPLATE_ID;
+}
+
 /** What the server tells the frontend at startup. */
 export interface ClientConfig {
   /** Null when the deployment sets no key. The GIF controls then stay hidden. */
@@ -87,6 +129,8 @@ export interface CreateBoardRequest {
   columns: string[];
   is_anonymous?: boolean;
   labels?: string[];
+  /** The template the board starts from. Absent for a custom board. */
+  template_id?: string;
 }
 
 /** A board that can supply actions to the board in view. */
@@ -132,6 +176,20 @@ export type ClientMessage =
   | { type: "SetVoteLimit"; payload: { limit: number | null } }
   | { type: "StartTimer"; payload: { duration_secs: number } }
   | { type: "StopTimer" }
+  | { type: "SetRockStatus"; payload: { ticket_id: string; status?: RockStatus | null } }
+  | { type: "RateMeeting"; payload: { rating: number } }
+  | { type: "AddScorecardMetric"; payload: { name: string; goal: string } }
+  | {
+      type: "UpdateScorecardMetric";
+      payload: {
+        metric_id: string;
+        name: string;
+        goal: string;
+        actual: string;
+        on_track?: boolean | null;
+      };
+    }
+  | { type: "RemoveScorecardMetric"; payload: { metric_id: string } }
   | { type: "RequestEditor"; payload: { name?: string } }
   | { type: "ApproveEditor"; payload: { participant_id: string } }
   | { type: "DeclineEditor"; payload: { participant_id: string } }
@@ -212,13 +270,18 @@ export const COLUMN_COLORS = [
   "#e9d5ff", // purple
 ] as const;
 
-/** The two role columns keep their own colors: paper grey for the archive, accent tint for output. */
+/**
+ * The role columns keep their own colors: paper grey for the archive, accent tint for output,
+ * and a muted sage for the rocks, which stand for a whole quarter and not for one week.
+ */
 export const COLUMN_ROLE_COLORS: Record<ColumnRole, string> = {
   previous_actions: "#d9d4cd",
   actions: "#f6cabb",
+  rocks: "#c7d6c0",
 };
 
 export const COLUMN_ROLE_NAMES: Record<ColumnRole, string> = {
   previous_actions: "Previous Actions",
   actions: "Actions",
+  rocks: "Rocks",
 };
