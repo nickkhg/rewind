@@ -24,6 +24,17 @@ pub enum ClientMessage {
         ticket_id: String,
         column_id: String,
     },
+    AddComment {
+        ticket_id: String,
+        content: String,
+    },
+    EditComment {
+        comment_id: String,
+        content: String,
+    },
+    RemoveComment {
+        comment_id: String,
+    },
     ToggleVote {
         ticket_id: String,
     },

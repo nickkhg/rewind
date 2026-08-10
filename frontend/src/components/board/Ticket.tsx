@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useBoardStore } from "../../store/boardStore";
 import { VoteButton } from "./VoteButton";
+import { CommentThread, CommentToggle } from "./CommentThread";
 import type { Ticket as TicketType, ClientMessage, ColumnRole } from "../../lib/types";
 
 interface TicketProps {
@@ -31,7 +32,10 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(ticket.content);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
+  const threadId = `comments-${ticket.id}`;
+  const comments = ticket.comments ?? [];
 
   const segments = ticket.content.split("\n---\n");
   const isMerged = segments.length > 1;
@@ -172,6 +176,15 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
           </span>
         )}
         <div className="flex items-center gap-2">
+          {/* A card you cannot read yet takes no discussion either. */}
+          {!isBlurred && (
+            <CommentToggle
+              count={comments.length}
+              open={commentsOpen}
+              threadId={threadId}
+              onToggle={() => setCommentsOpen((v) => !v)}
+            />
+          )}
           {!isCarried && (
             <VoteButton
               ticketId={ticket.id}
@@ -236,6 +249,19 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
           )}
         </div>
       </div>
+
+      {commentsOpen && !isBlurred && (
+        <CommentThread
+          threadId={threadId}
+          ticketId={ticket.id}
+          comments={comments}
+          color={color}
+          isAnonymous={!!board?.is_anonymous}
+          participantId={participantId}
+          isPrivileged={isPrivileged}
+          send={send}
+        />
+      )}
     </div>
   );
 }

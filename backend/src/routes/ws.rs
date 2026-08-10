@@ -7,7 +7,7 @@ use nanoid::nanoid;
 use tracing::{info, warn};
 
 use crate::db;
-use crate::models::Participant;
+use crate::models::{Participant, MAX_COMMENT_LENGTH};
 use crate::protocol::{ClientMessage, ServerMessage};
 use crate::state::AppState;
 use chrono::Utc;
@@ -271,6 +271,16 @@ async fn handle_socket(
     info!(participant_id, board_id, "participant left");
 }
 
+/// Removes the space at the two ends of a comment. Gives None if nothing is left,
+/// or if the comment is longer than the limit.
+fn clean_comment(content: &str) -> Option<String> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > MAX_COMMENT_LENGTH {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 async fn handle_message(
     state: &AppState,
     board_id: &str,
@@ -376,6 +386,73 @@ async fn handle_message(
                 Ok(()) => true,
                 Err(e) => {
                     warn!("Failed to move ticket: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::AddComment { ticket_id, content } => {
+            // Anyone on the board can comment, but only on a card of this board
+            match db::ticket_belongs_to_board(&state.db, &ticket_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
+
+            let Some(content) = clean_comment(&content) else {
+                return false;
+            };
+
+            let comment_id = nanoid!(8);
+            match db::add_comment(
+                &state.db,
+                &comment_id,
+                &ticket_id,
+                &content,
+                participant_id,
+                participant_name,
+                Utc::now(),
+            )
+            .await
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to add comment: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::EditComment { comment_id, content } => {
+            // Only the author can edit, and only on this board
+            match db::get_comment_author_on_board(&state.db, &comment_id, board_id).await {
+                Ok(Some(author_id)) if author_id == participant_id => {}
+                _ => return false,
+            }
+
+            let Some(content) = clean_comment(&content) else {
+                return false;
+            };
+
+            match db::edit_comment(&state.db, &comment_id, &content).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to edit comment: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::RemoveComment { comment_id } => {
+            // Author, facilitator, or editor
+            match db::get_comment_author_on_board(&state.db, &comment_id, board_id).await {
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
+                _ => return false,
+            }
+
+            match db::remove_comment(&state.db, &comment_id).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to remove comment: {e}");
                     false
                 }
             }

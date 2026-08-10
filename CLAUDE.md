@@ -37,7 +37,7 @@ Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri
 
 Messages are serde-tagged enums: `#[serde(tag = "type", content = "payload")]`. TypeScript mirrors this as discriminated unions in `lib/types.ts`.
 
-Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`
+Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`
 Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `Error`
 
 ## Column Roles and Actions Carry-Over
@@ -57,6 +57,10 @@ REST carries these three, not the WebSocket protocol, because each one answers t
 - **Vite proxy:** `/api` and `/ws` routes proxy to `localhost:3001` in dev (`vite.config.ts`), so both web and Tauri use relative URLs. `VITE_API_URL` env var overrides for production.
 - **Column colors** are hex strings in `COLUMN_COLORS` array (`lib/types.ts`), passed as props to Column/Ticket components and applied via inline `style`. The two role columns take their own colors from `COLUMN_ROLE_COLORS`; `utils/columnColors.ts` runs the sticky colors across the other columns only.
 - **Previous Actions cards** never blur and take no votes. They are a record of the last retro, not fresh input.
+- **Comments** hang under a card in a recessed strip that opens from the footer mark. A card that
+  is blurred for you shows no comment control, because you cannot read the card yet. Anyone can
+  comment, the writer can edit, and the writer, the facilitator, or an editor can delete. A merge
+  moves the comments of the source card onto the target card, and an undo sends them back.
 - **Card rotation** is seeded from ticket ID hash (deterministic, -1° to 1°).
 - **Blur** is CSS `filter: blur(8px)` with 500ms transition. Authors always see their own cards.
 - **Sorting** is client-side only (not synced): "newest" or "most-votes" in `utils/sort.ts`.
