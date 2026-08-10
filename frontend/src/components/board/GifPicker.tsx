@@ -244,9 +244,9 @@ export function GifPicker({
           href="https://giphy.com"
           target="_blank"
           rel="noreferrer noopener"
-          className="text-[10px] uppercase tracking-[0.18em] text-white/45 hover:text-white/80 transition-colors"
+          className="text-[10px] tracking-[0.06em] text-white/50 hover:text-white/90 transition-colors"
         >
-          via Giphy
+          Powered by <span className="font-semibold tracking-[0.12em]">GIPHY</span>
         </a>
       </div>
     </div>

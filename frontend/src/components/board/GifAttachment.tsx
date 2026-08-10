@@ -80,13 +80,18 @@ export function GifAttachment({ gif, size, blurred, onRemove }: GifAttachmentPro
           }}
         />
 
-        {/* The caption line of the mount: what the picture is, and where it came from. */}
+        {/*
+          The caption line of the mount. GIPHY asks that its name travel with its pictures, so the
+          credit is the one thing the foot always carries. The GIPHY title is not repeated here:
+          it is often a long description that truncates to nothing useful, and the alt text on the
+          picture already carries it for anyone who cannot see the picture.
+        */}
         <figcaption className="absolute bottom-0 left-0 right-0 flex items-center gap-1.5 px-2 pb-1 pt-0.5">
-          <span className="text-[8px] uppercase tracking-[0.14em] text-black/50 truncate">
-            {blurred ? "Hidden" : gif.title}
-          </span>
-          <span className="ml-auto shrink-0 text-[8px] uppercase tracking-[0.18em] text-black/30">
-            Giphy
+          {blurred && (
+            <span className="text-[8px] uppercase tracking-[0.14em] text-black/50">Hidden</span>
+          )}
+          <span className="ml-auto shrink-0 text-[8px] text-black/40">
+            Powered by <span className="font-semibold tracking-[0.06em]">GIPHY</span>
           </span>
         </figcaption>
 
