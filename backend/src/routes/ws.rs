@@ -194,18 +194,28 @@ async fn handle_socket(
             let count = state.participant_count(&board_id).await;
             let editors = db::get_board_editors(&state.db, &board_id).await.unwrap_or_default();
             let editor_requests = db::get_editor_requests(&state.db, &board_id).await.unwrap_or_default();
-            let msg = ServerMessage::BoardState {
-                board: board.to_view_with_participants(count, editors, editor_requests),
-            };
+            let mut view = board.to_view_with_participants(count, editors, editor_requests);
+            view.redact_hidden_for(&participant_id, is_facilitator);
+            let msg = ServerMessage::BoardState { board: view };
             let _ = sender
                 .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
                 .await;
         }
     }
 
-    // Spawn a task to forward broadcast messages to this client
+    // Spawn a task to forward broadcast messages to this client.
+    // The channel carries the whole board, so each client takes out what its own reader may not
+    // read yet before the state goes down the wire.
+    let redact_for = participant_id.clone();
     let mut send_task = tokio::spawn(async move {
         while let Ok(msg) = rx.recv().await {
+            let msg = match msg {
+                ServerMessage::BoardState { mut board } => {
+                    board.redact_hidden_for(&redact_for, is_facilitator);
+                    ServerMessage::BoardState { board }
+                }
+                other => other,
+            };
             let text = serde_json::to_string(&msg).unwrap();
             if sender.send(Message::Text(text.into())).await.is_err() {
                 break;

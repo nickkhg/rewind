@@ -3,4 +3,4 @@ name: rewind
 description: Rewind retrospective board — Axum backend serving React frontend
 type: application
 version: 0.1.0
-appVersion: "1.6.1"
+appVersion: "1.8.0"

@@ -174,6 +174,29 @@ pub struct BoardView {
     pub labels: Vec<String>,
 }
 
+/// The letters that stand in for the words of a card that the reader may not read yet.
+/// They are in order of how often English uses them, so that the filler under the blur has
+/// the colour of text.
+const MASK_ALPHABET: [u8; 26] = *b"etaoinshrdlcumwfgypbvkjxqz";
+
+/// Gives text of the same shape as the original and none of its meaning: every letter, digit and
+/// mark becomes a filler letter, and every space and line break stays where it was.
+///
+/// The card keeps its width, its line count and its height, so the board looks the same under
+/// the blur as it always did.
+pub fn mask_text(text: &str) -> String {
+    text.chars()
+        .enumerate()
+        .map(|(i, c)| {
+            if c.is_whitespace() {
+                c
+            } else {
+                MASK_ALPHABET[i % MASK_ALPHABET.len()] as char
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EditorView {
     pub participant_id: String,
@@ -207,6 +230,53 @@ impl Board {
             editors,
             editor_requests,
             labels: self.labels.clone(),
+        }
+    }
+}
+
+impl BoardView {
+    /// Replaces the words of every card this reader may not read yet with filler of the same
+    /// shape, and does the same to the comments under it.
+    ///
+    /// The blur in the browser is a picture, not a lock: anyone can read a hidden card in the
+    /// network panel. So the words of a hidden card do not leave the server at all. What the
+    /// reader is allowed to see stays as it was — an unblurred board, their own cards, the
+    /// carried actions, and everything a facilitator or an editor sees.
+    ///
+    /// GIFs stay as they are. The picture is hidden in the browser, and a card that lost its
+    /// picture here would change shape when the board opens.
+    pub fn redact_hidden_for(&mut self, participant_id: &str, is_facilitator: bool) {
+        if !self.is_blurred {
+            return;
+        }
+        let is_privileged = is_facilitator
+            || self
+                .editors
+                .iter()
+                .any(|e| e.participant_id == participant_id);
+        if is_privileged {
+            return;
+        }
+
+        for column in &mut self.columns {
+            // A carried action is a record of the last retro, not fresh input. It never blurs.
+            let carried_column = column.role.as_deref() == Some(ROLE_PREVIOUS_ACTIONS);
+            for ticket in &mut column.tickets {
+                let readable = carried_column
+                    || ticket.carried_from_board_title.is_some()
+                    || ticket.author_id == participant_id;
+                if readable {
+                    continue;
+                }
+                ticket.content = mask_text(&ticket.content);
+                ticket.author_name = mask_text(&ticket.author_name);
+                // A card you cannot read yet carries no discussion either, so the remarks under
+                // it go the same way. The count stays, because the card keeps its comment mark.
+                for comment in &mut ticket.comments {
+                    comment.content = mask_text(&comment.content);
+                    comment.author_name = mask_text(&comment.author_name);
+                }
+            }
         }
     }
 }
@@ -370,5 +440,122 @@ mod tests {
         let mut g = gif("https://media.giphy.com/a.gif");
         g.title = "   ".into();
         assert_eq!(sanitize_gif(g).unwrap().title, "GIF");
+    }
+
+    fn ticket(id: &str, content: &str, author_id: &str) -> Ticket {
+        Ticket {
+            id: id.into(),
+            content: content.into(),
+            author_id: author_id.into(),
+            author_name: "Rita".into(),
+            votes: HashSet::new(),
+            created_at: Utc::now(),
+            carried_from_board_id: None,
+            carried_from_board_title: None,
+            comments: vec![Comment {
+                id: "c1".into(),
+                content: "I agree".into(),
+                author_id: "other".into(),
+                author_name: "Sam".into(),
+                created_at: Utc::now(),
+                gif: None,
+            }],
+            gif: None,
+        }
+    }
+
+    fn board_view(is_blurred: bool) -> BoardView {
+        BoardView {
+            id: "b1".into(),
+            title: "Retro".into(),
+            columns: vec![
+                Column {
+                    id: "col-prev".into(),
+                    name: "Previous Actions".into(),
+                    role: Some(ROLE_PREVIOUS_ACTIONS.into()),
+                    tickets: vec![ticket("t-carried", "Book the room", "someone")],
+                },
+                Column {
+                    id: "col1".into(),
+                    name: "Went well".into(),
+                    role: None,
+                    tickets: vec![
+                        ticket("t-mine", "My own card", "me"),
+                        ticket("t-theirs", "The deploy broke", "someone"),
+                    ],
+                },
+            ],
+            is_blurred,
+            is_anonymous: false,
+            hide_votes: false,
+            created_at: Utc::now(),
+            participant_count: 2,
+            vote_limit_per_column: None,
+            timer_end: None,
+            editors: Vec::new(),
+            editor_requests: Vec::new(),
+            labels: Vec::new(),
+        }
+    }
+
+    fn find<'a>(view: &'a BoardView, ticket_id: &str) -> &'a Ticket {
+        view.columns
+            .iter()
+            .flat_map(|c| c.tickets.iter())
+            .find(|t| t.id == ticket_id)
+            .expect("ticket")
+    }
+
+    #[test]
+    fn mask_keeps_the_shape_and_drops_the_words() {
+        let masked = mask_text("Deploy broke\ntwice");
+        assert_eq!(masked.chars().count(), "Deploy broke\ntwice".chars().count());
+        assert_eq!(masked.find(' '), Some(6));
+        assert!(masked.contains('\n'));
+        assert!(!masked.contains("Deploy"));
+    }
+
+    #[test]
+    fn a_blurred_card_of_another_reader_loses_its_words() {
+        let mut view = board_view(true);
+        view.redact_hidden_for("me", false);
+
+        let theirs = find(&view, "t-theirs");
+        assert_ne!(theirs.content, "The deploy broke");
+        assert_eq!(theirs.content.chars().count(), "The deploy broke".chars().count());
+        assert_ne!(theirs.author_name, "Rita");
+        assert_ne!(theirs.comments[0].content, "I agree");
+        assert_eq!(theirs.comments.len(), 1);
+    }
+
+    #[test]
+    fn a_reader_keeps_their_own_cards_and_the_carried_actions() {
+        let mut view = board_view(true);
+        view.redact_hidden_for("me", false);
+
+        assert_eq!(find(&view, "t-mine").content, "My own card");
+        assert_eq!(find(&view, "t-carried").content, "Book the room");
+    }
+
+    #[test]
+    fn an_open_board_keeps_every_word() {
+        let mut view = board_view(false);
+        view.redact_hidden_for("me", false);
+        assert_eq!(find(&view, "t-theirs").content, "The deploy broke");
+    }
+
+    #[test]
+    fn the_facilitator_and_the_editors_read_a_blurred_board() {
+        let mut view = board_view(true);
+        view.redact_hidden_for("me", true);
+        assert_eq!(find(&view, "t-theirs").content, "The deploy broke");
+
+        let mut view = board_view(true);
+        view.editors.push(EditorView {
+            participant_id: "me".into(),
+            participant_name: "Me".into(),
+        });
+        view.redact_hidden_for("me", false);
+        assert_eq!(find(&view, "t-theirs").content, "The deploy broke");
     }
 }
