@@ -19,8 +19,14 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
   // A carried action is a record of the last retro, not fresh input: it stays visible and it
   // takes no votes.
   const isCarried = columnRole === "previous_actions";
-  const isBlurred = board?.is_blurred && !isAuthor && !isCarried && !(isPrivileged && facilitatorPeek);
+  // A card that came from another board is already public. It stays visible after a move too.
+  const fromOtherBoard = isCarried || !!ticket.carried_from_board_title;
+  const isBlurred =
+    board?.is_blurred && !isAuthor && !fromOtherBoard && !(isPrivileged && facilitatorPeek);
   const hasVoted = participantId ? ticket.votes.includes(participantId) : false;
+  // A carried action that is still open belongs in Actions, so that the next retro gets it again.
+  const actionsColumn = board?.columns.find((c) => c.role === "actions");
+  const canKeep = isCarried && isPrivileged && !!actionsColumn;
 
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(ticket.content);
@@ -58,6 +64,14 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
     send({ type: "RemoveTicket", payload: { ticket_id: ticket.id } });
   }
 
+  function handleKeep() {
+    if (!actionsColumn) return;
+    send({
+      type: "MoveTicket",
+      payload: { ticket_id: ticket.id, column_id: actionsColumn.id },
+    });
+  }
+
   return (
     <div
       className={`animate-card-enter rounded-lg border p-3 relative group ${
@@ -69,8 +83,8 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
         ...(isCarried ? { borderLeftStyle: "dashed" as const } : {}),
       }}
     >
-      {/* Where the carried action came from */}
-      {isCarried && ticket.carried_from_board_title && (
+      {/* Where the carried action came from. It stays with the card after a move to Actions. */}
+      {ticket.carried_from_board_title && (
         <p className="text-[10px] uppercase tracking-wider text-muted mb-1.5 truncate">
           {ticket.carried_from_board_id ? (
             <a
@@ -171,6 +185,15 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
           {/* Edit/Delete/Split shown on hover for author, facilitator, or editor */}
           {(isAuthor || isPrivileged) && !editing && (
             <div className="hidden group-hover:flex items-center gap-1">
+              {canKeep && (
+                <button
+                  onClick={handleKeep}
+                  className="text-xs text-muted hover:text-accent"
+                  title="The action is not done. Move it to Actions, and the next retro gets it again."
+                >
+                  Move to Actions
+                </button>
+              )}
               {isMerged && (
                 <div className="relative" ref={splitRef}>
                   <button

@@ -383,6 +383,20 @@ pub async fn edit_ticket(
     Ok(())
 }
 
+/// Puts a card into a different column of the same board. The votes stay with the card.
+pub async fn move_ticket(
+    pool: &PgPool,
+    ticket_id: &str,
+    column_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE tickets SET column_id = $1 WHERE id = $2")
+        .bind(column_id)
+        .bind(ticket_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn get_ticket_author(
     pool: &PgPool,
     ticket_id: &str,

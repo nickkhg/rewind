@@ -20,6 +20,10 @@ pub enum ClientMessage {
         ticket_id: String,
         content: String,
     },
+    MoveTicket {
+        ticket_id: String,
+        column_id: String,
+    },
     ToggleVote {
         ticket_id: String,
     },

@@ -82,6 +82,7 @@ export type ClientMessage =
   | { type: "AddTicket"; payload: { column_id: string; content: string } }
   | { type: "RemoveTicket"; payload: { ticket_id: string } }
   | { type: "EditTicket"; payload: { ticket_id: string; content: string } }
+  | { type: "MoveTicket"; payload: { ticket_id: string; column_id: string } }
   | { type: "ToggleVote"; payload: { ticket_id: string } }
   | { type: "ToggleBlur" }
   | { type: "ToggleHideVotes" }
