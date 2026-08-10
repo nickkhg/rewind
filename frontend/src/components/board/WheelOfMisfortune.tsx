@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchTeams } from "../../lib/api";
-import type { Team, TeamMember, ClientMessage } from "../../lib/types";
+import type { Team, TeamMember, ClientMessage, ColumnRole } from "../../lib/types";
 
 // --- Carnival color palette for wheel segments ---
 const SEGMENT_COLORS = [
@@ -36,7 +36,7 @@ function SpinningWheel({
   onResult: (entry: WheelEntry) => void;
   onBack: () => void;
   send: (msg: ClientMessage) => void;
-  boardColumns: { id: string; name: string }[];
+  boardColumns: { id: string; name: string; role: ColumnRole | null }[];
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
@@ -238,8 +238,9 @@ function SpinningWheel({
 
   function handleAccept() {
     if (!result) return;
-    // Add ticket to last column
-    const lastColumn = boardColumns[boardColumns.length - 1];
+    // Add ticket to the Actions column, or to the last column if the board has none
+    const lastColumn =
+      boardColumns.find((c) => c.role === "actions") ?? boardColumns[boardColumns.length - 1];
     if (lastColumn) {
       send({
         type: "AddTicket",
@@ -537,7 +538,7 @@ export function WheelOfMisfortuneButton({
   boardColumns,
 }: {
   send: (msg: ClientMessage) => void;
-  boardColumns: { id: string; name: string }[];
+  boardColumns: { id: string; name: string; role: ColumnRole | null }[];
 }) {
   const [open, setOpen] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);

@@ -1,8 +1,12 @@
 use chrono::{DateTime, Utc};
+use nanoid::nanoid;
 use sqlx::PgPool;
 use std::collections::HashSet;
 
-use crate::models::{Board, Column, EditorRequestView, EditorView, Ticket};
+use crate::models::{
+    ActionSourceBoard, Board, Column, EditorRequestView, EditorView, ImportResult, LabelCount,
+    Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
+};
 use crate::state::MergeSnapshot;
 
 // --- Board ---
@@ -13,9 +17,10 @@ pub async fn create_board(
     title: &str,
     facilitator_token: &str,
     facilitator_id: &str,
-    columns: &[(String, String)], // (id, name)
+    columns: &[(String, String, Option<&str>)], // (id, name, role)
     created_at: DateTime<Utc>,
     is_anonymous: bool,
+    labels: &[String],
 ) -> Result<Board, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
@@ -33,22 +38,32 @@ pub async fn create_board(
     .await?;
 
     let mut cols = Vec::new();
-    for (pos, (col_id, col_name)) in columns.iter().enumerate() {
+    for (pos, (col_id, col_name, role)) in columns.iter().enumerate() {
         sqlx::query(
-            "INSERT INTO columns (id, board_id, name, position) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO columns (id, board_id, name, position, role) VALUES ($1, $2, $3, $4, $5)",
         )
         .bind(col_id)
         .bind(id)
         .bind(col_name)
         .bind(pos as i32)
+        .bind(*role)
         .execute(&mut *tx)
         .await?;
 
         cols.push(Column {
             id: col_id.clone(),
             name: col_name.clone(),
+            role: role.map(|r| r.to_string()),
             tickets: Vec::new(),
         });
+    }
+
+    for label in labels {
+        sqlx::query("INSERT INTO board_labels (board_id, label) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(id)
+            .bind(label)
+            .execute(&mut *tx)
+            .await?;
     }
 
     tx.commit().await?;
@@ -66,6 +81,7 @@ pub async fn create_board(
         participants: Vec::new(),
         vote_limit_per_column: None,
         timer_end: None,
+        labels: labels.to_vec(),
     })
 }
 
@@ -82,7 +98,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
     };
 
     let col_rows = sqlx::query_as::<_, ColumnRow>(
-        "SELECT id, name, position FROM columns WHERE board_id = $1 ORDER BY position",
+        "SELECT id, name, position, role FROM columns WHERE board_id = $1 ORDER BY position",
     )
     .bind(board_id)
     .fetch_all(pool)
@@ -95,7 +111,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         Vec::new()
     } else {
         sqlx::query_as::<_, TicketRow>(
-            "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE column_id = ANY($1) ORDER BY created_at",
+            "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE column_id = ANY($1) ORDER BY created_at",
         )
         .bind(&col_ids)
         .fetch_all(pool)
@@ -137,6 +153,8 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             author_name: t.author_name,
             votes,
             created_at: t.created_at,
+            carried_from_board_id: t.carried_from_board_id,
+            carried_from_board_title: t.carried_from_board_title,
         });
     }
 
@@ -147,10 +165,13 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             Column {
                 id: c.id,
                 name: c.name,
+                role: c.role,
                 tickets,
             }
         })
         .collect();
+
+    let labels = get_board_labels(pool, board_id).await?;
 
     Ok(Some(Board {
         id: board_row.id,
@@ -165,6 +186,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         participants: Vec::new(),
         vote_limit_per_column: board_row.vote_limit_per_column,
         timer_end: board_row.timer_end,
+        labels,
     }))
 }
 
@@ -220,7 +242,8 @@ pub async fn get_boards_by_facilitator_id(
             b.created_at,
             b.is_anonymous,
             (SELECT COUNT(*) FROM columns c WHERE c.board_id = b.id) AS column_count,
-            (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id WHERE c.board_id = b.id) AS ticket_count
+            (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id WHERE c.board_id = b.id) AS ticket_count,
+            COALESCE((SELECT array_agg(l.label ORDER BY l.label) FROM board_labels l WHERE l.board_id = b.id), '{}'::text[]) AS labels
         FROM boards b
         WHERE b.facilitator_id = $1
         ORDER BY b.created_at DESC
@@ -239,6 +262,7 @@ pub async fn get_boards_by_facilitator_id(
             column_count: r.column_count,
             ticket_count: r.ticket_count,
             is_anonymous: r.is_anonymous,
+            labels: r.labels,
         })
         .collect())
 }
@@ -407,14 +431,14 @@ pub async fn merge_tickets(
 
     // Fetch both tickets
     let source = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE id = $1",
+        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE id = $1",
     )
     .bind(source_id)
     .fetch_optional(&mut *tx)
     .await?;
 
     let target = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE id = $1",
+        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE id = $1",
     )
     .bind(target_id)
     .fetch_optional(&mut *tx)
@@ -468,6 +492,8 @@ pub async fn merge_tickets(
         source_author_name: source.author_name,
         source_created_at: source.created_at,
         source_votes: source_vote_ids,
+        source_carried_from_board_id: source.carried_from_board_id,
+        source_carried_from_board_title: source.carried_from_board_title,
         target_id: target.id,
         target_original_content: target.content,
     }))
@@ -485,7 +511,7 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
 
     // Re-create source ticket
     sqlx::query(
-        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(&snapshot.source_id)
     .bind(&snapshot.source_column_id)
@@ -493,6 +519,8 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .bind(&snapshot.source_author_id)
     .bind(&snapshot.source_author_name)
     .bind(snapshot.source_created_at)
+    .bind(&snapshot.source_carried_from_board_id)
+    .bind(&snapshot.source_carried_from_board_title)
     .execute(&mut *tx)
     .await?;
 
@@ -522,7 +550,7 @@ pub async fn split_ticket(
     let mut tx = pool.begin().await?;
 
     let ticket = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at FROM tickets WHERE id = $1",
+        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE id = $1",
     )
     .bind(ticket_id)
     .fetch_optional(&mut *tx)
@@ -553,9 +581,9 @@ pub async fn split_ticket(
         .execute(&mut *tx)
         .await?;
 
-    // Insert new ticket with the extracted segment
+    // Insert new ticket with the extracted segment. It keeps the source board of the original.
     sqlx::query(
-        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(new_ticket_id)
     .bind(&ticket.column_id)
@@ -563,6 +591,8 @@ pub async fn split_ticket(
     .bind(participant_id)
     .bind(participant_name)
     .bind(Utc::now())
+    .bind(&ticket.carried_from_board_id)
+    .bind(&ticket.carried_from_board_title)
     .execute(&mut *tx)
     .await?;
 
@@ -1021,6 +1051,242 @@ pub async fn delete_team(pool: &PgPool, id: &str) -> Result<bool, sqlx::Error> {
     Ok(result.rows_affected() > 0)
 }
 
+// --- Actions carry-over ---
+
+/// Lists the boards that hold at least one action card, newest first.
+/// `labels` matches a board that carries any one of them.
+pub async fn list_action_sources(
+    pool: &PgPool,
+    exclude_board_id: &str,
+    search: &str,
+    labels: &[String],
+    limit: i64,
+) -> Result<Vec<ActionSourceBoard>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, ActionSourceRow>(
+        r#"
+        SELECT
+            b.id,
+            b.title,
+            b.created_at,
+            (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id
+              WHERE c.board_id = b.id AND c.role = 'actions') AS action_count,
+            COALESCE((SELECT array_agg(l.label ORDER BY l.label) FROM board_labels l WHERE l.board_id = b.id), '{}'::text[]) AS labels
+        FROM boards b
+        WHERE b.id <> $1
+          AND ($2 = '' OR b.title ILIKE '%' || $2 || '%')
+          AND (cardinality($3::text[]) = 0
+               OR EXISTS (SELECT 1 FROM board_labels l WHERE l.board_id = b.id AND l.label = ANY($3)))
+          AND EXISTS (SELECT 1 FROM tickets t JOIN columns c ON t.column_id = c.id
+                       WHERE c.board_id = b.id AND c.role = 'actions')
+        ORDER BY b.created_at DESC
+        LIMIT $4
+        "#,
+    )
+    .bind(exclude_board_id)
+    .bind(search)
+    .bind(labels)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| ActionSourceBoard {
+            id: r.id,
+            title: r.title,
+            created_at: r.created_at,
+            action_count: r.action_count,
+            labels: r.labels,
+        })
+        .collect())
+}
+
+/// Copies the action cards of the source board into the Previous Actions column of the target
+/// board. A card whose text is already there is skipped, so a second copy adds nothing. Votes do
+/// not move. Returns `None` when a board or one of the two columns does not exist.
+pub async fn copy_actions(
+    pool: &PgPool,
+    source_board_id: &str,
+    target_board_id: &str,
+) -> Result<Option<ImportResult>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    let source_column = sqlx::query_as::<_, ColumnIdRow>(
+        "SELECT id FROM columns WHERE board_id = $1 AND role = $2",
+    )
+    .bind(source_board_id)
+    .bind(ROLE_ACTIONS)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let target_column = sqlx::query_as::<_, ColumnIdRow>(
+        "SELECT id FROM columns WHERE board_id = $1 AND role = $2",
+    )
+    .bind(target_board_id)
+    .bind(ROLE_PREVIOUS_ACTIONS)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let source_title = sqlx::query_as::<_, TitleRow>("SELECT title FROM boards WHERE id = $1")
+        .bind(source_board_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+    let (Some(source_column), Some(target_column), Some(source_title)) =
+        (source_column, target_column, source_title)
+    else {
+        return Ok(None);
+    };
+
+    let target_anonymous = sqlx::query_as::<_, AnonymousRow>(
+        "SELECT is_anonymous FROM boards WHERE id = $1",
+    )
+    .bind(target_board_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    .map(|r| r.is_anonymous)
+    .unwrap_or(false);
+
+    let source_tickets = sqlx::query_as::<_, TicketRow>(
+        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE column_id = $1 ORDER BY created_at",
+    )
+    .bind(&source_column.id)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let existing = sqlx::query_as::<_, ContentRow>("SELECT content FROM tickets WHERE column_id = $1")
+        .bind(&target_column.id)
+        .fetch_all(&mut *tx)
+        .await?;
+    let mut existing: HashSet<String> = existing
+        .into_iter()
+        .map(|r| r.content.trim().to_string())
+        .collect();
+
+    let mut imported = 0usize;
+    let mut skipped = 0usize;
+
+    for ticket in source_tickets {
+        if !existing.insert(ticket.content.trim().to_string()) {
+            skipped += 1;
+            continue;
+        }
+
+        let author_name = if target_anonymous {
+            String::new()
+        } else {
+            ticket.author_name
+        };
+
+        sqlx::query(
+            "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(nanoid!(8))
+        .bind(&target_column.id)
+        .bind(&ticket.content)
+        .bind(&ticket.author_id)
+        .bind(&author_name)
+        .bind(Utc::now())
+        .bind(source_board_id)
+        .bind(&source_title.title)
+        .execute(&mut *tx)
+        .await?;
+
+        imported += 1;
+    }
+
+    tx.commit().await?;
+
+    Ok(Some(ImportResult { imported, skipped }))
+}
+
+// --- Labels ---
+
+pub async fn get_board_labels(pool: &PgPool, board_id: &str) -> Result<Vec<String>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, LabelNameRow>(
+        "SELECT label FROM board_labels WHERE board_id = $1 ORDER BY label",
+    )
+    .bind(board_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.label).collect())
+}
+
+pub async fn set_board_labels(
+    pool: &PgPool,
+    board_id: &str,
+    labels: &[String],
+) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM board_labels WHERE board_id = $1")
+        .bind(board_id)
+        .execute(&mut *tx)
+        .await?;
+
+    for label in labels {
+        sqlx::query("INSERT INTO board_labels (board_id, label) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+            .bind(board_id)
+            .bind(label)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn list_labels(pool: &PgPool) -> Result<Vec<LabelCount>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, LabelRow>(
+        "SELECT label, COUNT(*) AS board_count FROM board_labels GROUP BY label ORDER BY board_count DESC, label",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| LabelCount {
+            label: r.label,
+            board_count: r.board_count,
+        })
+        .collect())
+}
+
+// --- Authorization ---
+
+/// Tells if the caller can change this board: the facilitator token, the facilitator cookie, or a
+/// place in the editor list. This is the rule that the WebSocket handler also applies.
+pub async fn is_board_privileged(
+    pool: &PgPool,
+    board_id: &str,
+    facilitator_token: Option<&str>,
+    facilitator_id_cookie: Option<&str>,
+    participant_id: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    if let Some(token) = facilitator_token {
+        if let Some(board_token) = get_board_facilitator_token(pool, board_id).await? {
+            if board_token == token {
+                return Ok(true);
+            }
+        }
+    }
+
+    if let Some(cookie) = facilitator_id_cookie {
+        if let Some(board_facilitator) = get_board_facilitator_id(pool, board_id).await? {
+            if board_facilitator == cookie {
+                return Ok(true);
+            }
+        }
+    }
+
+    if let Some(participant_id) = participant_id {
+        if is_editor(pool, board_id, participant_id).await? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 // --- Row types for query_as ---
 
 #[derive(sqlx::FromRow)]
@@ -1048,6 +1314,7 @@ struct ColumnRow {
     name: String,
     #[allow(dead_code)]
     position: i32,
+    role: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1058,6 +1325,8 @@ struct TicketRow {
     author_id: String,
     author_name: String,
     created_at: DateTime<Utc>,
+    carried_from_board_id: Option<String>,
+    carried_from_board_title: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1099,6 +1368,42 @@ struct MyBoardRow {
     is_anonymous: bool,
     column_count: i64,
     ticket_count: i64,
+    labels: Vec<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ActionSourceRow {
+    id: String,
+    title: String,
+    created_at: DateTime<Utc>,
+    action_count: i64,
+    labels: Vec<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct LabelRow {
+    label: String,
+    board_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct LabelNameRow {
+    label: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ColumnIdRow {
+    id: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ContentRow {
+    content: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct TitleRow {
+    title: String,
 }
 
 #[derive(sqlx::FromRow)]

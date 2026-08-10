@@ -17,6 +17,8 @@ pub struct MergeSnapshot {
     pub source_author_name: String,
     pub source_created_at: DateTime<Utc>,
     pub source_votes: Vec<String>,
+    pub source_carried_from_board_id: Option<String>,
+    pub source_carried_from_board_title: Option<String>,
     pub target_id: String,
     pub target_original_content: String,
 }
