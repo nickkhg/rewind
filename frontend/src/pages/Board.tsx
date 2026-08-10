@@ -15,8 +15,10 @@ import { BoardHeader } from "../components/board/BoardHeader";
 import { Column } from "../components/board/Column";
 import { TicketCard } from "../components/board/Ticket";
 import { MergeUndoToast } from "../components/board/MergeUndoToast";
+import { ScorecardPanel } from "../components/board/ScorecardPanel";
 import { WheelOfMisfortuneButton } from "../components/board/WheelOfMisfortune";
 import { columnColors } from "../utils/columnColors";
+import { isLevel10 } from "../lib/types";
 import type { Ticket } from "../lib/types";
 import { AppShell } from "../components/layout/AppShell";
 
@@ -179,6 +181,8 @@ export default function Board() {
   return (
     <AppShell>
       <BoardHeader send={send} />
+      {/* The numbers a Level 10 team reads before it works the board. */}
+      {isLevel10(board) && <ScorecardPanel send={send} />}
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}

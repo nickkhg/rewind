@@ -96,6 +96,8 @@ export default function Home() {
         columns: trimmedCols,
         is_anonymous: isAnonymous || undefined,
         labels: labels.length > 0 ? labels : undefined,
+        // The board remembers the template it started from. A custom board remembers none.
+        template_id: selectedTemplate ?? undefined,
       });
       sessionStorage.setItem(`facilitator_token_${res.board.id}`, res.facilitator_token);
       if (isAnonymous) {

@@ -7,7 +7,10 @@ use nanoid::nanoid;
 use tracing::{info, warn};
 
 use crate::db;
-use crate::models::{sanitize_gif, Participant, MAX_COMMENT_LENGTH};
+use crate::models::{
+    sanitize_gif, valid_rock_status, Participant, MAX_COMMENT_LENGTH,
+    MAX_SCORECARD_FIELD_LENGTH, TEMPLATE_LEVEL10,
+};
 use crate::protocol::{ClientMessage, ServerMessage};
 use crate::state::AppState;
 use chrono::Utc;
@@ -292,6 +295,26 @@ fn clean_comment(content: &str, has_gif: bool) -> Option<String> {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+/// Removes the space at the two ends of one scorecard field. Gives None if it is too long.
+fn clean_scorecard_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.chars().count() > MAX_SCORECARD_FIELD_LENGTH {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+/// Tells whether this board runs a Level 10 meeting. The scorecard and the rating belong to
+/// such a board alone.
+async fn is_level10_board(state: &AppState, board_id: &str) -> bool {
+    db::get_board_template_id(&state.db, board_id)
+        .await
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some(TEMPLATE_LEVEL10)
 }
 
 async fn handle_message(
@@ -692,6 +715,132 @@ async fn handle_message(
                 Ok(()) => true,
                 Err(e) => {
                     warn!("Failed to stop timer: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::SetRockStatus { ticket_id, status } => {
+            if let Some(ref status) = status {
+                if !valid_rock_status(status) {
+                    return false;
+                }
+            }
+
+            // Only a card in the Rocks column of this board carries a mark. A board with no such
+            // column — every board that is not a Level 10 board — refuses the message here.
+            match db::ticket_in_rocks_column(&state.db, &ticket_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
+
+            // Author, facilitator, or editor, as with a move
+            match db::get_ticket_author(&state.db, &ticket_id).await {
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
+                _ => return false,
+            }
+
+            match db::set_rock_status(&state.db, &ticket_id, status.as_deref()).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to set rock status: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::RateMeeting { rating } => {
+            // Anyone in the meeting rates it, as anyone votes.
+            if !(1..=10).contains(&rating) {
+                return false;
+            }
+            if !is_level10_board(state, board_id).await {
+                return false;
+            }
+            match db::upsert_meeting_rating(&state.db, board_id, participant_id, rating).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to rate meeting: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::AddScorecardMetric { name, goal } => {
+            if !is_privileged || !is_level10_board(state, board_id).await {
+                return false;
+            }
+            let (Some(name), Some(goal)) =
+                (clean_scorecard_field(&name), clean_scorecard_field(&goal))
+            else {
+                return false;
+            };
+            // A line with no name says nothing. The goal may wait.
+            if name.is_empty() {
+                return false;
+            }
+
+            let metric_id = nanoid!(8);
+            match db::add_scorecard_metric(&state.db, &metric_id, board_id, &name, &goal).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to add scorecard metric: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::UpdateScorecardMetric {
+            metric_id,
+            name,
+            goal,
+            actual,
+            on_track,
+        } => {
+            if !is_privileged || !is_level10_board(state, board_id).await {
+                return false;
+            }
+            let (Some(name), Some(goal), Some(actual)) = (
+                clean_scorecard_field(&name),
+                clean_scorecard_field(&goal),
+                clean_scorecard_field(&actual),
+            ) else {
+                return false;
+            };
+            if name.is_empty() {
+                return false;
+            }
+
+            // The board is part of the WHERE, so a line of another board does not answer.
+            match db::update_scorecard_metric(
+                &state.db,
+                &metric_id,
+                board_id,
+                &name,
+                &goal,
+                &actual,
+                on_track,
+            )
+            .await
+            {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    warn!("Failed to update scorecard metric: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::RemoveScorecardMetric { metric_id } => {
+            if !is_privileged || !is_level10_board(state, board_id).await {
+                return false;
+            }
+            match db::remove_scorecard_metric(&state.db, &metric_id, board_id).await {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    warn!("Failed to remove scorecard metric: {e}");
                     false
                 }
             }

@@ -9,7 +9,7 @@ use crate::error::AppError;
 use crate::models::{
     normalize_labels, ActionSourceBoard, CreateBoardRequest, CreateBoardResponse, ImportResult,
     LabelCount, MyBoardSummary, Template, RESERVED_COLUMN_NAMES, ROLE_ACTIONS,
-    ROLE_PREVIOUS_ACTIONS,
+    ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS, TEMPLATE_LEVEL10,
 };
 use crate::state::AppState;
 use chrono::Utc;
@@ -43,6 +43,14 @@ pub async fn create_board(
     let created_at = Utc::now();
     let labels = normalize_labels(&req.labels);
 
+    // The board keeps the template as a format tag. An id that names no template is dropped,
+    // so that a made-up value cannot turn a feature on.
+    let template_id = match req.template_id.as_deref() {
+        Some(id) if db::template_exists(&state.db, id).await? => Some(id.to_string()),
+        _ => None,
+    };
+    let is_level10 = template_id.as_deref() == Some(TEMPLATE_LEVEL10);
+
     // Every board starts with Previous Actions and ends with Actions. A column that the caller
     // asks for with one of those names would only repeat them.
     let mut columns: Vec<(String, String, Option<&str>)> = vec![(
@@ -50,11 +58,22 @@ pub async fn create_board(
         "Previous Actions".to_string(),
         Some(ROLE_PREVIOUS_ACTIONS),
     )];
+    // On a Level 10 board the Rocks column takes a role, which is what lets a card in it carry a
+    // rock status. Only the first such column gets it: one column of each role to a board.
+    let mut rocks_taken = false;
     columns.extend(
         req.columns
             .into_iter()
             .filter(|name| !RESERVED_COLUMN_NAMES.contains(&name.trim().to_lowercase().as_str()))
-            .map(|name| (nanoid!(8), name, None)),
+            .map(|name| {
+                let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks" {
+                    rocks_taken = true;
+                    Some(ROLE_ROCKS)
+                } else {
+                    None
+                };
+                (nanoid!(8), name, role)
+            }),
     );
     columns.push((nanoid!(8), "Actions".to_string(), Some(ROLE_ACTIONS)));
 
@@ -68,6 +87,7 @@ pub async fn create_board(
         created_at,
         req.is_anonymous,
         &labels,
+        template_id.as_deref(),
     )
     .await?;
 

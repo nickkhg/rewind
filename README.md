@@ -27,7 +27,8 @@ No accounts needed. The facilitator creates a board, shares a link, and the team
 - **Blur / Reveal** — facilitator controls card visibility; authors always see their own cards. Facilitators and editors can peek at blurred cards without revealing them to everyone
 - **Voting** — toggle votes on any card, sort by most votes or newest
 - **Editor access requests** — participants can request editor privileges; the facilitator approves or declines from the settings menu. Editors get the same controls as the facilitator (blur, vote limits, timer, delete/split cards). On anonymous boards, requesters provide a display name. The facilitator can revoke editor access at any time
-- **Board templates** — Classic, Start/Stop/Continue, 4Ls, Mad Sad Glad, Sailboat, DAKI — managed in the database
+- **Board templates** — Classic, Start/Stop/Continue, 4Ls, Mad Sad Glad, Sailboat, DAKI, Level 10 — managed in the database
+- **Level 10 meetings** — a board made from the Level 10 template adds a scorecard (metric, goal, this week, on track) kept by the facilitator, an on-track / off-track mark on the cards in the Rocks column, and a 1–10 meeting rating from each participant with the average in the header. Every other board shows none of these
 - **Custom columns** — or define your own column layout
 - **Anonymous boards** — optional name-free mode (enabled by default)
 - **Share link** — one-click copy to clipboard

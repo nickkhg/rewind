@@ -5,6 +5,8 @@ import { FacilitatorMenu } from "./FacilitatorMenu";
 import { TimerDisplay } from "./TimerDisplay";
 import { SortControls } from "./SortControls";
 import { EditorRequestButton } from "./EditorRequestButton";
+import { MeetingRating } from "./MeetingRating";
+import { isLevel10 } from "../../lib/types";
 import type { ClientMessage } from "../../lib/types";
 
 interface BoardHeaderProps {
@@ -53,6 +55,8 @@ export function BoardHeader({ send }: BoardHeaderProps) {
         <div className="flex items-center gap-3 shrink-0">
           <SortControls />
           <TimerDisplay />
+          {/* A Level 10 meeting closes on a mark out of ten. */}
+          {isLevel10(board) && <MeetingRating send={send} />}
           {!isFacilitator && !isEditor && <EditorRequestButton send={send} />}
           {(isFacilitator || isEditor) && <FacilitatorMenu send={send} />}
           <button

@@ -5,7 +5,8 @@ use std::collections::HashSet;
 
 use crate::models::{
     ActionSourceBoard, Board, Column, Comment, EditorRequestView, EditorView, Gif, ImportResult,
-    LabelCount, Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
+    LabelCount, MeetingRatingView, ScorecardMetric, Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
+    ROLE_ROCKS, TEMPLATE_LEVEL10,
 };
 use crate::state::MergeSnapshot;
 
@@ -13,7 +14,7 @@ use crate::state::MergeSnapshot;
 /// reaches every query at once.
 const TICKET_COLUMNS: &str = "id, column_id, content, author_id, author_name, created_at, \
      carried_from_board_id, carried_from_board_title, \
-     gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title";
+     gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, rock_status";
 
 /// The same list for a comment.
 const COMMENT_COLUMNS: &str = "id, ticket_id, content, author_id, author_name, created_at, \
@@ -31,11 +32,12 @@ pub async fn create_board(
     created_at: DateTime<Utc>,
     is_anonymous: bool,
     labels: &[String],
+    template_id: Option<&str>,
 ) -> Result<Board, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO boards (id, title, facilitator_token, facilitator_id, is_blurred, is_anonymous, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "INSERT INTO boards (id, title, facilitator_token, facilitator_id, is_blurred, is_anonymous, created_at, template_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(id)
     .bind(title)
@@ -44,6 +46,7 @@ pub async fn create_board(
     .bind(true)
     .bind(is_anonymous)
     .bind(created_at)
+    .bind(template_id)
     .execute(&mut *tx)
     .await?;
 
@@ -92,12 +95,15 @@ pub async fn create_board(
         vote_limit_per_column: None,
         timer_end: None,
         labels: labels.to_vec(),
+        template_id: template_id.map(|t| t.to_string()),
+        scorecard: Vec::new(),
+        meeting_ratings: Vec::new(),
     })
 }
 
 pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, sqlx::Error> {
     let row = sqlx::query_as::<_, BoardRow>(
-        "SELECT id, title, is_blurred, is_anonymous, hide_votes, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end FROM boards WHERE id = $1",
+        "SELECT id, title, is_blurred, is_anonymous, hide_votes, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end, template_id FROM boards WHERE id = $1",
     )
     .bind(board_id)
     .fetch_optional(pool)
@@ -196,6 +202,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             carried_from_board_title: t.carried_from_board_title,
             comments,
             gif,
+            rock_status: t.rock_status,
         });
     }
 
@@ -214,6 +221,18 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
 
     let labels = get_board_labels(pool, board_id).await?;
 
+    // The scorecard and the ratings belong to a Level 10 board alone. Every other board would
+    // pay for two more queries on each broadcast and read two empty lists.
+    let is_level10 = board_row.template_id.as_deref() == Some(TEMPLATE_LEVEL10);
+    let (scorecard, meeting_ratings) = if is_level10 {
+        (
+            get_scorecard(pool, board_id).await?,
+            get_meeting_ratings(pool, board_id).await?,
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
     Ok(Some(Board {
         id: board_row.id,
         title: board_row.title,
@@ -228,6 +247,9 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         vote_limit_per_column: board_row.vote_limit_per_column,
         timer_end: board_row.timer_end,
         labels,
+        template_id: board_row.template_id,
+        scorecard,
+        meeting_ratings,
     }))
 }
 
@@ -326,6 +348,18 @@ pub async fn list_templates(pool: &PgPool) -> Result<Vec<crate::models::Template
             columns: r.columns,
         })
         .collect())
+}
+
+/// Tells whether a template of this id is on file. A board keeps the id it was made from,
+/// so the id is checked once here and then never again.
+pub async fn template_exists(pool: &PgPool, template_id: &str) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM templates WHERE id = $1",
+    )
+    .bind(template_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count > 0)
 }
 
 pub async fn create_template(
@@ -709,6 +743,8 @@ pub async fn merge_tickets(
         source_carried_from_board_title: source.carried_from_board_title,
         source_comment_ids,
         source_gif,
+        // The target keeps its own mark. The one from the source card waits here for the undo.
+        source_rock_status: source.rock_status,
         target_id: target.id,
         target_original_content: target.content,
         target_original_gif: target_gif,
@@ -735,13 +771,13 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .execute(&mut *tx)
     .await?;
 
-    // Re-create source ticket, GIF and all
+    // Re-create source ticket, GIF, rock status and all
     let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(snapshot.source_gif.as_ref());
     sqlx::query(
         "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
          carried_from_board_id, carried_from_board_title, \
-         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, rock_status) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
     )
     .bind(&snapshot.source_id)
     .bind(&snapshot.source_column_id)
@@ -757,6 +793,7 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .bind(gw)
     .bind(gh)
     .bind(gtitle)
+    .bind(&snapshot.source_rock_status)
     .execute(&mut *tx)
     .await?;
 
@@ -1508,6 +1545,175 @@ pub async fn list_labels(pool: &PgPool) -> Result<Vec<LabelCount>, sqlx::Error> 
         .collect())
 }
 
+// --- Level 10 ---
+
+/// The template a board was made from, or None for a custom board or a board that is not there.
+pub async fn get_board_template_id(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row = sqlx::query_as::<_, TemplateIdRow>("SELECT template_id FROM boards WHERE id = $1")
+        .bind(board_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.and_then(|r| r.template_id))
+}
+
+/// Tells whether a card sits in the Rocks column of this board. Only a Level 10 board has such a
+/// column, so this one check keeps the rock status on the boards that want it.
+pub async fn ticket_in_rocks_column(
+    pool: &PgPool,
+    ticket_id: &str,
+    board_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM tickets t JOIN columns c ON c.id = t.column_id \
+         WHERE t.id = $1 AND c.board_id = $2 AND c.role = $3",
+    )
+    .bind(ticket_id)
+    .bind(board_id)
+    .bind(ROLE_ROCKS)
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count > 0)
+}
+
+/// Marks a rock on track or off track. None takes the mark off again.
+pub async fn set_rock_status(
+    pool: &PgPool,
+    ticket_id: &str,
+    status: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE tickets SET rock_status = $1 WHERE id = $2")
+        .bind(status)
+        .bind(ticket_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Records what one participant thinks of the meeting. A second mark replaces the first.
+pub async fn upsert_meeting_rating(
+    pool: &PgPool,
+    board_id: &str,
+    participant_id: &str,
+    rating: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO meeting_ratings (board_id, participant_id, rating) VALUES ($1, $2, $3) \
+         ON CONFLICT (board_id, participant_id) DO UPDATE SET rating = EXCLUDED.rating",
+    )
+    .bind(board_id)
+    .bind(participant_id)
+    .bind(rating)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_meeting_ratings(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Vec<MeetingRatingView>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, MeetingRatingRow>(
+        "SELECT participant_id, rating FROM meeting_ratings WHERE board_id = $1",
+    )
+    .bind(board_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| MeetingRatingView {
+            participant_id: r.participant_id,
+            rating: r.rating,
+        })
+        .collect())
+}
+
+pub async fn get_scorecard(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Vec<ScorecardMetric>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, ScorecardRow>(
+        "SELECT id, name, goal, actual, on_track, position FROM scorecard_metrics \
+         WHERE board_id = $1 ORDER BY position, id",
+    )
+    .bind(board_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| ScorecardMetric {
+            id: r.id,
+            name: r.name,
+            goal: r.goal,
+            actual: r.actual,
+            on_track: r.on_track,
+        })
+        .collect())
+}
+
+/// Adds a line at the foot of the scorecard.
+pub async fn add_scorecard_metric(
+    pool: &PgPool,
+    metric_id: &str,
+    board_id: &str,
+    name: &str,
+    goal: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO scorecard_metrics (id, board_id, name, goal, position) \
+         SELECT $1, $2, $3, $4, COALESCE(MAX(position) + 1, 0) \
+         FROM scorecard_metrics WHERE board_id = $2",
+    )
+    .bind(metric_id)
+    .bind(board_id)
+    .bind(name)
+    .bind(goal)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Writes a whole scorecard line. The board is part of the WHERE, so a caller cannot reach
+/// a line of another board with an id they guessed. False means nothing changed.
+pub async fn update_scorecard_metric(
+    pool: &PgPool,
+    metric_id: &str,
+    board_id: &str,
+    name: &str,
+    goal: &str,
+    actual: &str,
+    on_track: Option<bool>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE scorecard_metrics SET name = $1, goal = $2, actual = $3, on_track = $4 \
+         WHERE id = $5 AND board_id = $6",
+    )
+    .bind(name)
+    .bind(goal)
+    .bind(actual)
+    .bind(on_track)
+    .bind(metric_id)
+    .bind(board_id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn remove_scorecard_metric(
+    pool: &PgPool,
+    metric_id: &str,
+    board_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM scorecard_metrics WHERE id = $1 AND board_id = $2")
+        .bind(metric_id)
+        .bind(board_id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 // --- Authorization ---
 
 /// Tells if the caller can change this board: the facilitator token, the facilitator cookie, or a
@@ -1558,6 +1764,7 @@ struct BoardRow {
     created_at: DateTime<Utc>,
     vote_limit_per_column: Option<i32>,
     timer_end: Option<DateTime<Utc>>,
+    template_id: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1590,6 +1797,7 @@ struct TicketRow {
     gif_width: Option<i32>,
     gif_height: Option<i32>,
     gif_title: Option<String>,
+    rock_status: Option<String>,
 }
 
 impl TicketRow {
@@ -1772,6 +1980,28 @@ struct TemplateRow {
 #[derive(sqlx::FromRow)]
 struct CountRow {
     count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct TemplateIdRow {
+    template_id: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ScorecardRow {
+    id: String,
+    name: String,
+    goal: String,
+    actual: String,
+    on_track: Option<bool>,
+    #[allow(dead_code)]
+    position: i32,
+}
+
+#[derive(sqlx::FromRow)]
+struct MeetingRatingRow {
+    participant_id: String,
+    rating: i32,
 }
 
 #[derive(sqlx::FromRow)]

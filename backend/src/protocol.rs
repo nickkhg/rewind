@@ -66,6 +66,31 @@ pub enum ClientMessage {
         duration_secs: u32,
     },
     StopTimer,
+    /// Marks a rock on track or off track. Absent takes the mark off the card.
+    SetRockStatus {
+        ticket_id: String,
+        #[serde(default)]
+        status: Option<String>,
+    },
+    /// What this participant thinks of the meeting, from 1 to 10. A second mark replaces the first.
+    RateMeeting {
+        rating: i32,
+    },
+    AddScorecardMetric {
+        name: String,
+        goal: String,
+    },
+    UpdateScorecardMetric {
+        metric_id: String,
+        name: String,
+        goal: String,
+        actual: String,
+        #[serde(default)]
+        on_track: Option<bool>,
+    },
+    RemoveScorecardMetric {
+        metric_id: String,
+    },
     RequestEditor {
         name: Option<String>,
     },
