@@ -16,8 +16,10 @@ export function Column({ column, color, send }: ColumnProps) {
   const voteLimit = useBoardStore((s) => s.board?.vote_limit_per_column ?? null);
   const hideVotes = useBoardStore((s) => s.board?.hide_votes ?? false);
   const isBlurred = useBoardStore((s) => s.board?.is_blurred ?? false);
+  // Carried actions come from the last retro. They hold no votes and they never hide.
+  const isArchive = column.role === "previous_actions";
   const effectiveSortMode = hideVotes ? "newest" : sortMode;
-  const sorted = sortTickets(column.tickets, effectiveSortMode);
+  const sorted = sortTickets(column.tickets, isArchive ? "newest" : effectiveSortMode);
 
   // Count how many votes the current participant has in this column
   const myVotesInColumn = participantId
@@ -38,7 +40,7 @@ export function Column({ column, color, send }: ColumnProps) {
         />
         <h2 className="font-display font-semibold text-base">{column.name}</h2>
         <span className="text-xs text-muted">{column.tickets.length}</span>
-        {voteLimit !== null && !hideVotes && (
+        {voteLimit !== null && !hideVotes && !isArchive && (
           <span className="text-xs text-muted ml-auto">
             {myVotesInColumn}/{voteLimit} votes
           </span>
@@ -48,14 +50,21 @@ export function Column({ column, color, send }: ColumnProps) {
       <AddTicketForm columnId={column.id} send={send} />
 
       <div className="space-y-2.5 overflow-y-auto min-h-0 flex-1">
+        {isArchive && column.tickets.length === 0 && (
+          <p className="text-xs text-muted leading-relaxed border border-dashed border-border rounded-lg px-3 py-4">
+            Nothing carried over yet. The facilitator can copy the actions of an earlier retro from
+            Board Settings.
+          </p>
+        )}
         {sorted.map((ticket) => (
           <DraggableTicket
             key={ticket.id}
             ticket={ticket}
             color={color}
             columnId={column.id}
+            columnRole={column.role}
             voteLimitReached={voteLimitReached}
-            isBlurred={isBlurred}
+            isBlurred={isBlurred && !isArchive}
             send={send}
           />
         ))}

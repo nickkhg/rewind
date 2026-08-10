@@ -30,6 +30,18 @@ export function BoardHeader({ send }: BoardHeaderProps) {
         <div className="flex items-center gap-4 min-w-0">
           <Logo className="text-xl text-accent shrink-0" />
           <h1 className="font-display text-lg font-semibold truncate">{board.title}</h1>
+          {board.labels.length > 0 && (
+            <div className="hidden sm:flex items-center gap-1.5 shrink-0">
+              {board.labels.map((label) => (
+                <span
+                  key={label}
+                  className="text-[11px] px-1.5 py-0.5 rounded-md border border-border text-muted"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          )}
           <span className="text-xs text-muted shrink-0">
             {board.participant_count} {board.participant_count === 1 ? "person" : "people"}
           </span>

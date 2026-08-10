@@ -51,6 +51,16 @@ async fn main() {
         .route("/api/templates", get(routes::boards::list_templates))
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))
+        .route(
+            "/api/boards/{id}/action-sources",
+            get(routes::boards::list_action_sources),
+        )
+        .route(
+            "/api/boards/{id}/actions/import",
+            post(routes::boards::import_actions),
+        )
+        .route("/api/boards/{id}/labels", put(routes::boards::set_labels))
+        .route("/api/labels", get(routes::boards::list_labels))
         .route("/api/my-boards", get(routes::boards::my_boards))
         .route("/api/teams", get(routes::boards::list_teams))
         .route("/ws/boards/{id}", get(routes::ws::ws_handler))

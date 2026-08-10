@@ -16,7 +16,7 @@ import { Column } from "../components/board/Column";
 import { TicketCard } from "../components/board/Ticket";
 import { MergeUndoToast } from "../components/board/MergeUndoToast";
 import { WheelOfMisfortuneButton } from "../components/board/WheelOfMisfortune";
-import { COLUMN_COLORS } from "../lib/types";
+import { columnColors } from "../utils/columnColors";
 import type { Ticket } from "../lib/types";
 import { AppShell } from "../components/layout/AppShell";
 
@@ -79,7 +79,7 @@ export default function Board() {
       };
       // Find the color for this column
       const colIndex = board?.columns.findIndex((c) => c.id === columnId) ?? 0;
-      const color = COLUMN_COLORS[colIndex % COLUMN_COLORS.length];
+      const color = board ? columnColors(board.columns)[colIndex] : "";
       setActiveTicket({ ticket, color });
     },
     [board]
@@ -174,6 +174,8 @@ export default function Board() {
     );
   }
 
+  const colors = columnColors(board.columns);
+
   return (
     <AppShell>
       <BoardHeader send={send} />
@@ -189,7 +191,7 @@ export default function Board() {
                 <Column
                   key={col.id}
                   column={col}
-                  color={COLUMN_COLORS[i % COLUMN_COLORS.length]}
+                  color={colors[i]}
                   send={send}
                 />
               ))}
@@ -212,7 +214,7 @@ export default function Board() {
       {isFacilitator && (
         <WheelOfMisfortuneButton
           send={send}
-          boardColumns={board.columns.map((c) => ({ id: c.id, name: c.name }))}
+          boardColumns={board.columns.map((c) => ({ id: c.id, name: c.name, role: c.role }))}
         />
       )}
     </AppShell>

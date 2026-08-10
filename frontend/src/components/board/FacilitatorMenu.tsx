@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useBoardStore } from "../../store/boardStore";
 import { VoteLimitControl } from "./VoteLimitControl";
 import { TimerControl } from "./TimerControl";
+import { BoardLabelsControl } from "./BoardLabelsControl";
+import { CarryActionsPanel } from "./CarryActionsPanel";
 import type { ClientMessage } from "../../lib/types";
 
 interface FacilitatorMenuProps {
@@ -16,6 +18,7 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
   const facilitatorPeek = useBoardStore((s) => s.facilitatorPeek);
   const toggleFacilitatorPeek = useBoardStore((s) => s.toggleFacilitatorPeek);
   const isFacilitator = useBoardStore((s) => s.isFacilitator);
+  const boardId = useBoardStore((s) => s.board?.id);
   const editors = useBoardStore((s) => s.board?.editors ?? []);
   const editorRequests = useBoardStore((s) => s.board?.editor_requests ?? []);
 
@@ -149,6 +152,20 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
 
               {/* Timer */}
               <TimerControl send={send} />
+
+              {boardId && (
+                <>
+                  <hr className="border-border" />
+
+                  {/* Labels */}
+                  <BoardLabelsControl boardId={boardId} />
+
+                  <hr className="border-border" />
+
+                  {/* Actions of an earlier retro */}
+                  <CarryActionsPanel boardId={boardId} />
+                </>
+              )}
 
               {/* Editors & Requests — facilitator only */}
               {isFacilitator && (editors.length > 0 || editorRequests.length > 0) && (

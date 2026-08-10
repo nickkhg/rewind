@@ -21,11 +21,16 @@ export interface Board {
   timer_end: string | null;
   editors: EditorInfo[];
   editor_requests: EditorRequest[];
+  labels: string[];
 }
+
+/** Every board has one column of each role. The other columns have no role. */
+export type ColumnRole = "previous_actions" | "actions";
 
 export interface Column {
   id: string;
   name: string;
+  role: ColumnRole | null;
   tickets: Ticket[];
 }
 
@@ -36,12 +41,34 @@ export interface Ticket {
   author_name: string;
   votes: string[];
   created_at: string;
+  carried_from_board_id: string | null;
+  carried_from_board_title: string | null;
 }
 
 export interface CreateBoardRequest {
   title: string;
   columns: string[];
   is_anonymous?: boolean;
+  labels?: string[];
+}
+
+/** A board that can supply actions to the board in view. */
+export interface ActionSourceBoard {
+  id: string;
+  title: string;
+  created_at: string;
+  action_count: number;
+  labels: string[];
+}
+
+export interface LabelCount {
+  label: string;
+  board_count: number;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
 }
 
 export interface CreateBoardResponse {
@@ -81,6 +108,7 @@ export interface MyBoardSummary {
   column_count: number;
   ticket_count: number;
   is_anonymous: boolean;
+  labels: string[];
 }
 
 export interface Template {
@@ -142,3 +170,14 @@ export const COLUMN_COLORS = [
   "#bfdbfe", // blue
   "#e9d5ff", // purple
 ] as const;
+
+/** The two role columns keep their own colors: paper grey for the archive, accent tint for output. */
+export const COLUMN_ROLE_COLORS: Record<ColumnRole, string> = {
+  previous_actions: "#d9d4cd",
+  actions: "#f6cabb",
+};
+
+export const COLUMN_ROLE_NAMES: Record<ColumnRole, string> = {
+  previous_actions: "Previous Actions",
+  actions: "Actions",
+};

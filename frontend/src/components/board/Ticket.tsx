@@ -1,21 +1,25 @@
 import { useState, useRef, useEffect } from "react";
 import { useBoardStore } from "../../store/boardStore";
 import { VoteButton } from "./VoteButton";
-import type { Ticket as TicketType, ClientMessage } from "../../lib/types";
+import type { Ticket as TicketType, ClientMessage, ColumnRole } from "../../lib/types";
 
 interface TicketProps {
   ticket: TicketType;
   color: string;
+  columnRole?: ColumnRole | null;
   voteLimitReached?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProps) {
+export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }: TicketProps) {
   const { participantId, isFacilitator, board, facilitatorPeek } = useBoardStore();
   const isAuthor = ticket.author_id === participantId;
   const isEditor = !!(board && participantId && board.editors.some((e) => e.participant_id === participantId));
   const isPrivileged = isFacilitator || isEditor;
-  const isBlurred = board?.is_blurred && !isAuthor && !(isPrivileged && facilitatorPeek);
+  // A carried action is a record of the last retro, not fresh input: it stays visible and it
+  // takes no votes.
+  const isCarried = columnRole === "previous_actions";
+  const isBlurred = board?.is_blurred && !isAuthor && !isCarried && !(isPrivileged && facilitatorPeek);
   const hasVoted = participantId ? ticket.votes.includes(participantId) : false;
 
   const [editing, setEditing] = useState(false);
@@ -56,12 +60,32 @@ export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProp
 
   return (
     <div
-      className="animate-card-enter bg-surface rounded-lg shadow-sm border border-border/60 p-3 relative group"
+      className={`animate-card-enter rounded-lg border p-3 relative group ${
+        isCarried ? "bg-canvas border-border" : "bg-surface shadow-sm border-border/60"
+      }`}
       style={{
         borderLeftWidth: "4px",
         borderLeftColor: color,
+        ...(isCarried ? { borderLeftStyle: "dashed" as const } : {}),
       }}
     >
+      {/* Where the carried action came from */}
+      {isCarried && ticket.carried_from_board_title && (
+        <p className="text-[10px] uppercase tracking-wider text-muted mb-1.5 truncate">
+          {ticket.carried_from_board_id ? (
+            <a
+              href={`/board/${ticket.carried_from_board_id}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="hover:text-accent transition-colors"
+            >
+              from {ticket.carried_from_board_title}
+            </a>
+          ) : (
+            <>from {ticket.carried_from_board_title}</>
+          )}
+        </p>
+      )}
+
       {/* Content */}
       {editing ? (
         <div>
@@ -134,14 +158,16 @@ export function TicketCard({ ticket, color, voteLimitReached, send }: TicketProp
           </span>
         )}
         <div className="flex items-center gap-2">
-          <VoteButton
-            ticketId={ticket.id}
-            voteCount={ticket.votes.length}
-            hasVoted={hasVoted}
-            voteLimitReached={voteLimitReached}
-            hideVotes={board?.hide_votes}
-            send={send}
-          />
+          {!isCarried && (
+            <VoteButton
+              ticketId={ticket.id}
+              voteCount={ticket.votes.length}
+              hasVoted={hasVoted}
+              voteLimitReached={voteLimitReached}
+              hideVotes={board?.hide_votes}
+              send={send}
+            />
+          )}
           {/* Edit/Delete/Split shown on hover for author, facilitator, or editor */}
           {(isAuthor || isPrivileged) && !editing && (
             <div className="hidden group-hover:flex items-center gap-1">

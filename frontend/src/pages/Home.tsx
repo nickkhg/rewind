@@ -1,27 +1,14 @@
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
-import { createBoard, fetchMyBoards, fetchTemplates } from "../lib/api";
+import { LabelInput } from "../components/LabelInput";
+import { createBoard, fetchLabels, fetchMyBoards, fetchTemplates } from "../lib/api";
 import type { MyBoardSummary, Template } from "../lib/types";
-import { COLUMN_COLORS } from "../lib/types";
+import { COLUMN_COLORS, COLUMN_ROLE_COLORS, COLUMN_ROLE_NAMES } from "../lib/types";
+import { formatRelativeDate } from "../utils/date";
 import { isTauri, getServerUrl } from "../lib/serverUrl";
 
-const DEFAULT_COLUMNS = ["Went Well", "To Improve", "Action Items"];
-
-function formatRelativeDate(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60_000);
-  const diffHours = Math.floor(diffMs / 3_600_000);
-  const diffDays = Math.floor(diffMs / 86_400_000);
-
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
+const DEFAULT_COLUMNS = ["Went Well", "To Improve"];
 
 function extractBoardId(input: string): string | null {
   const trimmed = input.trim();
@@ -44,6 +31,8 @@ export default function Home() {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>("classic");
   const [name, setName] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(true);
+  const [labels, setLabels] = useState<string[]>([]);
+  const [labelSuggestions, setLabelSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [myBoards, setMyBoards] = useState<MyBoardSummary[]>([]);
@@ -70,6 +59,9 @@ export default function Home() {
         const classic = tpls.find((t) => t.id === "classic");
         if (classic) setColumns([...classic.columns]);
       })
+      .catch(() => {});
+    fetchLabels()
+      .then((counts) => setLabelSuggestions(counts.map((c) => c.label)))
       .catch(() => {});
   }, []);
 
@@ -103,6 +95,7 @@ export default function Home() {
         title: trimmedTitle,
         columns: trimmedCols,
         is_anonymous: isAnonymous || undefined,
+        labels: labels.length > 0 ? labels : undefined,
       });
       sessionStorage.setItem(`facilitator_token_${res.board.id}`, res.facilitator_token);
       if (isAnonymous) {
@@ -157,6 +150,22 @@ export default function Home() {
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Sprint 42 Retro"
               className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="labels" className="block text-sm font-medium mb-1.5">
+              Labels
+            </label>
+            <p className="text-xs text-muted mb-2">
+              Group this board with the other retros of the same kind. You can carry actions
+              between them later.
+            </p>
+            <LabelInput
+              id="labels"
+              labels={labels}
+              onChange={setLabels}
+              suggestions={labelSuggestions}
             />
           </div>
 
@@ -261,6 +270,19 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            <div className="mt-3 flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-muted">Every board also gets</span>
+              {(["previous_actions", "actions"] as const).map((role) => (
+                <span
+                  key={role}
+                  className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-md"
+                  style={{ backgroundColor: COLUMN_ROLE_COLORS[role], color: "#2d2a26" }}
+                >
+                  {COLUMN_ROLE_NAMES[role]}
+                </span>
+              ))}
+            </div>
           </div>
 
           <label className="flex items-center gap-3 cursor-pointer group">
@@ -363,6 +385,18 @@ export default function Home() {
                         {b.ticket_count} {b.ticket_count === 1 ? "card" : "cards"}
                         {b.is_anonymous && " \u00B7 anonymous"}
                       </span>
+                      {b.labels.length > 0 && (
+                        <span className="flex flex-wrap gap-1.5 mt-1.5">
+                          {b.labels.map((label) => (
+                            <span
+                              key={label}
+                              className="text-[11px] px-1.5 py-0.5 rounded-md border border-border text-muted"
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs text-muted whitespace-nowrap shrink-0">
                       {formatRelativeDate(b.created_at)}

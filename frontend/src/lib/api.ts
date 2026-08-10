@@ -1,6 +1,10 @@
 import type {
+  ActionSourceBoard,
+  Board,
   CreateBoardRequest,
   CreateBoardResponse,
+  ImportResult,
+  LabelCount,
   MyBoardSummary,
   Template,
   Team,
@@ -21,6 +25,14 @@ export async function createBoard(req: CreateBoardRequest): Promise<CreateBoardR
   return res.json();
 }
 
+export async function fetchBoard(id: string): Promise<Board> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${id}`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function fetchTemplates(): Promise<Template[]> {
   const res = await fetch(`${getServerUrl()}/api/templates`);
   if (!res.ok) throw new Error(await res.text());
@@ -30,6 +42,66 @@ export async function fetchTemplates(): Promise<Template[]> {
 export async function fetchMyBoards(): Promise<MyBoardSummary[]> {
   const res = await fetch(`${getServerUrl()}/api/my-boards`, {
     credentials: "include",
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// --- Actions carry-over and labels ---
+
+/** Tells the server who asks. The board settings hold both values. */
+function boardAuth(boardId: string) {
+  return {
+    facilitator_token: sessionStorage.getItem(`facilitator_token_${boardId}`) ?? undefined,
+    participant_id: sessionStorage.getItem(`participant_id_${boardId}`) ?? undefined,
+  };
+}
+
+export async function fetchActionSources(
+  boardId: string,
+  opts: { q?: string; labels?: string[] } = {},
+): Promise<ActionSourceBoard[]> {
+  const params = new URLSearchParams();
+  if (opts.q) params.set("q", opts.q);
+  if (opts.labels?.length) params.set("labels", opts.labels.join(","));
+  const query = params.toString();
+  const res = await fetch(
+    `${getServerUrl()}/api/boards/${boardId}/action-sources${query ? `?${query}` : ""}`,
+    { credentials: "include" },
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function importActions(
+  boardId: string,
+  sourceBoardId: string,
+): Promise<ImportResult> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${boardId}/actions/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ source_board_id: sourceBoardId, ...boardAuth(boardId) }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function fetchLabels(): Promise<LabelCount[]> {
+  const res = await fetch(`${getServerUrl()}/api/labels`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function updateBoardLabels(
+  boardId: string,
+  labels: string[],
+): Promise<string[]> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${boardId}/labels`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ labels, ...boardAuth(boardId) }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

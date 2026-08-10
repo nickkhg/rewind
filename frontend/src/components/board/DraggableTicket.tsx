@@ -1,17 +1,18 @@
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { TicketCard } from "./Ticket";
-import type { Ticket as TicketType, ClientMessage } from "../../lib/types";
+import type { Ticket as TicketType, ClientMessage, ColumnRole } from "../../lib/types";
 
 interface DraggableTicketProps {
   ticket: TicketType;
   color: string;
   columnId: string;
+  columnRole?: ColumnRole | null;
   voteLimitReached?: boolean;
   isBlurred?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function DraggableTicket({ ticket, color, columnId, voteLimitReached, isBlurred, send }: DraggableTicketProps) {
+export function DraggableTicket({ ticket, color, columnId, columnRole, voteLimitReached, isBlurred, send }: DraggableTicketProps) {
   const {
     attributes,
     listeners,
@@ -50,7 +51,13 @@ export function DraggableTicket({ ticket, color, columnId, voteLimitReached, isB
           transition: "box-shadow 150ms ease",
         }}
       >
-        <TicketCard ticket={ticket} color={color} voteLimitReached={voteLimitReached} send={send} />
+        <TicketCard
+          ticket={ticket}
+          color={color}
+          columnRole={columnRole}
+          voteLimitReached={voteLimitReached}
+          send={send}
+        />
       </div>
     </div>
   );

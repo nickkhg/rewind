@@ -26,7 +26,9 @@ pub async fn ws_handler(
     })
 }
 
-async fn broadcast_board_state(state: &AppState, board_id: &str) {
+/// Sends the full board state to every client of the board. The REST handlers that change a board
+/// call this too, so that all views stay in step.
+pub async fn broadcast_board_state(state: &AppState, board_id: &str) {
     let board = match db::get_board(&state.db, board_id).await {
         Ok(Some(b)) => b,
         _ => return,
