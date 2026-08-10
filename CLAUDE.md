@@ -40,6 +40,8 @@ Messages are serde-tagged enums: `#[serde(tag = "type", content = "payload")]`. 
 Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`
 Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `Error`
 
+`AddTicket`, `EditTicket`, `AddComment` and `EditComment` each carry an optional `gif`. The client sends the whole state it wants, so an edit that leaves `gif` out takes the picture off the card.
+
 ## Column Roles and Actions Carry-Over
 
 Every board has two columns with a `role` in the `columns` table: `previous_actions` (first) and `actions` (last). A unique partial index keeps one column of each role per board. All other columns have `role = NULL` and keep their free-text names. Templates must not supply an action column — `create_board` drops a requested column that uses one of `RESERVED_COLUMN_NAMES` (`models.rs`).
@@ -51,6 +53,37 @@ The facilitator or an editor copies the actions of any other board into Previous
 - `PUT /api/boards/{id}/labels` and `GET /api/labels` manage the board labels. Labels are free text, kept lower case, six per board at most (`normalize_labels` in `models.rs`).
 
 REST carries these three, not the WebSocket protocol, because each one answers the caller with a result or an error. `db::is_board_privileged` applies the same rule as the WebSocket handler: facilitator token, facilitator cookie, or a place in the editor list.
+
+## GIFs from GIPHY
+
+A card or a comment can carry one GIF. The writer types `/gif` and what to search for in any
+composer, and a pane opens under it and searches GIPHY as they type: the composer is the search
+field, so the pane holds no search box of its own. Picking a GIF takes the command back out of the
+draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of the draft.
+
+- **The key** arrives from a Kubernetes secret (`giphy-api-key` in the chart Secret, read as
+  `GIPHY_API_KEY`) and reaches the browser at `GET /api/config`. The GIPHY web SDK calls GIPHY
+  from the client, so the key cannot stay on the server; the secret keeps it out of the image and
+  out of git, not out of the browser. Use a domain-restricted key. No key set means no GIF
+  controls at all, in every composer.
+- **The SDK** (`@giphy/react-components`) sits in the pane alone, which `useGifComposer` loads
+  with `React.lazy`. A retro that uses no GIFs loads none of that code.
+- **The database** holds six columns per GIF on `tickets` and on `ticket_comments`: the id, the
+  moving URL, the still URL, the natural width and height, and the title. A card draws the picture
+  from those, with no second call to GIPHY. `db::TICKET_COLUMNS` and `db::COMMENT_COLUMNS` keep the
+  read list in one place.
+- **The URL is checked** by `models::sanitize_gif`, which refuses anything that is not HTTPS on
+  `giphy.com` or a subdomain. The client chooses the URL, so an open field here would let anyone
+  put a picture of their own on someone else's board.
+- **A GIF is a whole remark.** A comment with a GIF and no words is allowed; a card is too. Both
+  refuse to be empty of words *and* picture.
+- **A hidden GIF** takes `blur(16px) saturate(0.35)`, heavier than the 8px on text, and its caption
+  reads "Hidden". Blurred words are unreadable at once, but a picture keeps its shape and colours
+  and a known GIF is recognisable from those alone.
+- **A card rests on the still frame** and moves on hover or focus. A board of GIFs all moving at
+  once is unreadable, and `prefers-reduced-motion` keeps the pane and the card still.
+- **A merge** hands the source GIF over only when the target has none, and the undo puts both back.
+  A split leaves the GIF on the original card. A carried action keeps its GIF.
 
 ## Key Conventions
 

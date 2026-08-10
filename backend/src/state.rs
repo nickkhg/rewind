@@ -1,4 +1,4 @@
-use crate::models::Participant;
+use crate::models::{Gif, Participant};
 use crate::protocol::ServerMessage;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -21,8 +21,12 @@ pub struct MergeSnapshot {
     pub source_carried_from_board_title: Option<String>,
     /// The comments that moved to the target card with the merge. An undo sends them back.
     pub source_comment_ids: Vec<String>,
+    /// The GIF of the source card. A merge onto a card with no GIF hands this over,
+    /// so the undo has to know where it came from.
+    pub source_gif: Option<Gif>,
     pub target_id: String,
     pub target_original_content: String,
+    pub target_original_gif: Option<Gif>,
 }
 
 #[derive(Clone)]
@@ -32,16 +36,23 @@ pub struct AppState {
     pub channels: Arc<RwLock<HashMap<String, BoardChannel>>>,
     pub admin_token_hash: Option<String>,
     pub last_merge: Arc<RwLock<HashMap<String, MergeSnapshot>>>,
+    /// The GIPHY key from the Kubernetes secret. None leaves the GIF controls out of the frontend.
+    pub giphy_api_key: Option<String>,
 }
 
 impl AppState {
-    pub fn new(db: PgPool, admin_token_hash: Option<String>) -> Self {
+    pub fn new(
+        db: PgPool,
+        admin_token_hash: Option<String>,
+        giphy_api_key: Option<String>,
+    ) -> Self {
         Self {
             db,
             participants: Arc::new(RwLock::new(HashMap::new())),
             channels: Arc::new(RwLock::new(HashMap::new())),
             admin_token_hash,
             last_merge: Arc::new(RwLock::new(HashMap::new())),
+            giphy_api_key,
         }
     }
 

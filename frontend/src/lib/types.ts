@@ -44,6 +44,7 @@ export interface Ticket {
   carried_from_board_id: string | null;
   carried_from_board_title: string | null;
   comments: TicketComment[];
+  gif: Gif | null;
 }
 
 /** A remark on one card. It changes neither the text of the card nor its votes. */
@@ -53,10 +54,33 @@ export interface TicketComment {
   author_id: string;
   author_name: string;
   created_at: string;
+  gif: Gif | null;
+}
+
+/**
+ * One GIF from GIPHY, attached to a card or to a comment. The board holds enough to draw the
+ * picture on its own, so a card needs no call to GIPHY to appear.
+ */
+export interface Gif {
+  id: string;
+  /** The moving picture. */
+  url: string;
+  /** The first frame. A card rests on this until the reader asks for motion. */
+  still_url: string;
+  width: number;
+  height: number;
+  /** The GIPHY title, which becomes the alt text. */
+  title: string;
 }
 
 /** The most characters that one comment can hold. The backend applies the same limit. */
 export const MAX_COMMENT_LENGTH = 500;
+
+/** What the server tells the frontend at startup. */
+export interface ClientConfig {
+  /** Null when the deployment sets no key. The GIF controls then stay hidden. */
+  giphy_api_key: string | null;
+}
 
 export interface CreateBoardRequest {
   title: string;
@@ -92,12 +116,12 @@ export interface CreateBoardResponse {
 // WebSocket protocol
 export type ClientMessage =
   | { type: "Join"; payload: { participant_name: string; facilitator_token?: string; participant_id?: string } }
-  | { type: "AddTicket"; payload: { column_id: string; content: string } }
+  | { type: "AddTicket"; payload: { column_id: string; content: string; gif?: Gif | null } }
   | { type: "RemoveTicket"; payload: { ticket_id: string } }
-  | { type: "EditTicket"; payload: { ticket_id: string; content: string } }
+  | { type: "EditTicket"; payload: { ticket_id: string; content: string; gif?: Gif | null } }
   | { type: "MoveTicket"; payload: { ticket_id: string; column_id: string } }
-  | { type: "AddComment"; payload: { ticket_id: string; content: string } }
-  | { type: "EditComment"; payload: { comment_id: string; content: string } }
+  | { type: "AddComment"; payload: { ticket_id: string; content: string; gif?: Gif | null } }
+  | { type: "EditComment"; payload: { comment_id: string; content: string; gif?: Gif | null } }
   | { type: "RemoveComment"; payload: { comment_id: string } }
   | { type: "ToggleVote"; payload: { ticket_id: string } }
   | { type: "ToggleBlur" }

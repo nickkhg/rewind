@@ -1,4 +1,4 @@
-use crate::models::BoardView;
+use crate::models::{BoardView, Gif};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -12,6 +12,9 @@ pub enum ClientMessage {
     AddTicket {
         column_id: String,
         content: String,
+        /// A GIF the writer picked with `/gif`. Absent when the card is words alone.
+        #[serde(default)]
+        gif: Option<Gif>,
     },
     RemoveTicket {
         ticket_id: String,
@@ -19,6 +22,9 @@ pub enum ClientMessage {
     EditTicket {
         ticket_id: String,
         content: String,
+        /// The GIF the card keeps after the edit. Absent takes the GIF off the card.
+        #[serde(default)]
+        gif: Option<Gif>,
     },
     MoveTicket {
         ticket_id: String,
@@ -27,10 +33,14 @@ pub enum ClientMessage {
     AddComment {
         ticket_id: String,
         content: String,
+        #[serde(default)]
+        gif: Option<Gif>,
     },
     EditComment {
         comment_id: String,
         content: String,
+        #[serde(default)]
+        gif: Option<Gif>,
     },
     RemoveComment {
         comment_id: String,
