@@ -9,6 +9,11 @@
   --color-muted: #a8a29e;
   --color-border: #e7e5e4;
 
+  /* The GIF pane. A dark surface is the one place this paper board needs: light pictures
+     disappear against paper, and a viewing surface should sit behind what it shows. */
+  --color-darkroom: #241f1c;
+  --color-darkroom-edge: #423a35;
+
   --font-display: "Fraunces", serif;
   --font-body: "Plus Jakarta Sans", sans-serif;
 }
@@ -36,6 +41,9 @@
     --color-accent-hover: #e89680;
     --color-muted: #7a736d;
     --color-border: #3a3532;
+    /* Deeper than the dark canvas, so the pane still reads as recessed. */
+    --color-darkroom: #100f0e;
+    --color-darkroom-edge: #322c28;
   }
 }
 
@@ -86,6 +94,44 @@
 
 .animate-thread-unfurl {
   animation: thread-unfurl 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The GIF pane arrives the way a print comes up: it rises into place and settles. */
+@keyframes gif-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-gif-pane-in {
+  animation: gif-pane-in 170ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top center;
+}
+
+/* A GIF is laid on the card like a photograph, so it arrives as one. */
+@keyframes gif-place {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) rotate(0deg);
+  }
+}
+
+.animate-gif-place {
+  animation: gif-place 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* A board of moving pictures is unreadable, so a card rests on the still frame and moves
+   only when the reader asks. Anyone who has asked for less motion always gets the still. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-gif-pane-in,
+  .animate-gif-place {
+    animation: fade-in 1ms linear;
+  }
 }
 
 /* Facilitator menu animations */

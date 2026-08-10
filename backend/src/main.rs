@@ -44,10 +44,23 @@ async fn main() {
         tracing::info!("admin interface enabled");
     }
 
-    let state = AppState::new(db, admin_token_hash);
+    // The key comes from a Kubernetes secret. An empty value counts as no key at all, because
+    // the chart writes an empty string when the operator leaves the value out.
+    let giphy_api_key = std::env::var("GIPHY_API_KEY")
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty());
+    if giphy_api_key.is_some() {
+        tracing::info!("GIPHY enabled");
+    } else {
+        tracing::info!("no GIPHY key set — GIF controls are off");
+    }
+
+    let state = AppState::new(db, admin_token_hash, giphy_api_key);
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_default();
 
     let mut app = Router::new()
+        .route("/api/config", get(routes::config::get_config))
         .route("/api/templates", get(routes::boards::list_templates))
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))

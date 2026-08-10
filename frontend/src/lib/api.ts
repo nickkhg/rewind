@@ -1,6 +1,7 @@
 import type {
   ActionSourceBoard,
   Board,
+  ClientConfig,
   CreateBoardRequest,
   CreateBoardResponse,
   ImportResult,
@@ -29,6 +30,13 @@ export async function fetchBoard(id: string): Promise<Board> {
   const res = await fetch(`${getServerUrl()}/api/boards/${id}`, {
     credentials: "include",
   });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Reads the settings the server holds, among them the GIPHY key from the Kubernetes secret. */
+export async function fetchConfig(): Promise<ClientConfig> {
+  const res = await fetch(`${getServerUrl()}/api/config`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

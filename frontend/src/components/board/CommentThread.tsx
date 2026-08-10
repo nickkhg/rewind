@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { formatRelativeDate } from "../../utils/date";
+import { useGifComposer } from "../../hooks/useGifComposer";
+import { GifAttachment } from "./GifAttachment";
 import { MAX_COMMENT_LENGTH } from "../../lib/types";
-import type { ClientMessage, TicketComment } from "../../lib/types";
+import type { ClientMessage, Gif, TicketComment } from "../../lib/types";
 
 /** Below this many characters left, the composer starts to count down. */
 const COUNTDOWN_FROM = 80;
@@ -77,26 +79,69 @@ export function CommentThread({
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  const [editGif, setEditGif] = useState<Gif | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const editRef = useRef<HTMLTextAreaElement>(null);
 
   // The thread opens because someone wants to write in it.
   useEffect(() => {
     composerRef.current?.focus();
   }, []);
 
-  const remaining = MAX_COMMENT_LENGTH - draft.trim().length;
-  const canSend = draft.trim().length > 0 && remaining >= 0;
+  // A GIF on its own is a whole remark, which is most of what a reaction is.
+  const [draftGif, setDraftGif] = useState<Gif | null>(null);
+
+  // `text` is each draft without its `/gif` command, which is what the comment should say.
+  const {
+    picker: draftPicker,
+    hint: draftHint,
+    text: draftText,
+  } = useGifComposer({
+    value: draft,
+    onChange: setDraft,
+    gif: draftGif,
+    onGifChange: setDraftGif,
+    anchor: composerRef.current,
+    focus: () => composerRef.current?.focus(),
+  });
+
+  const {
+    picker: editPicker,
+    hint: editHint,
+    text: editText,
+  } = useGifComposer({
+    value: editDraft,
+    onChange: setEditDraft,
+    gif: editGif,
+    onGifChange: setEditGif,
+    anchor: editRef.current,
+    focus: () => editRef.current?.focus(),
+  });
+
+  const remaining = MAX_COMMENT_LENGTH - draftText.length;
+  const canSend = (draftText.length > 0 || draftGif !== null) && remaining >= 0;
 
   function handleSend() {
     if (!canSend) return;
-    send({ type: "AddComment", payload: { ticket_id: ticketId, content: draft.trim() } });
+    send({
+      type: "AddComment",
+      payload: { ticket_id: ticketId, content: draftText, gif: draftGif },
+    });
     setDraft("");
+    setDraftGif(null);
   }
 
   function handleSaveEdit(comment: TicketComment) {
-    const trimmed = editDraft.trim();
-    if (trimmed && trimmed !== comment.content && trimmed.length <= MAX_COMMENT_LENGTH) {
-      send({ type: "EditComment", payload: { comment_id: comment.id, content: trimmed } });
+    if (!editText && !editGif) {
+      setEditingId(null);
+      return;
+    }
+    const changed = editText !== comment.content || editGif?.id !== comment.gif?.id;
+    if (changed && editText.length <= MAX_COMMENT_LENGTH) {
+      send({
+        type: "EditComment",
+        payload: { comment_id: comment.id, content: editText, gif: editGif },
+      });
     }
     setEditingId(null);
   }
@@ -130,6 +175,7 @@ export function CommentThread({
                 {editing ? (
                   <div>
                     <textarea
+                      ref={editRef}
                       value={editDraft}
                       onChange={(e) => setEditDraft(e.target.value)}
                       onKeyDown={(e) => {
@@ -144,20 +190,34 @@ export function CommentThread({
                       className="w-full rounded border border-border px-2 py-1 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 bg-surface"
                       autoFocus
                     />
-                    <div className="flex gap-2 mt-1 text-xs">
+                    {editGif && (
+                      <div className="flex">
+                        <GifAttachment
+                          gif={editGif}
+                          size="comment"
+                          onRemove={() => setEditGif(null)}
+                        />
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 mt-1 text-xs">
                       <button onClick={() => handleSaveEdit(comment)} className="text-accent hover:underline">
                         Save
                       </button>
                       <button onClick={() => setEditingId(null)} className="text-muted hover:underline">
                         Cancel
                       </button>
+                      {editHint && <span className="ml-auto">{editHint}</span>}
                     </div>
+                    {editPicker}
                   </div>
                 ) : (
                   <>
-                    <p className="text-[13px] leading-snug whitespace-pre-wrap break-words">
-                      {comment.content}
-                    </p>
+                    {comment.content && (
+                      <p className="text-[13px] leading-snug whitespace-pre-wrap break-words">
+                        {comment.content}
+                      </p>
+                    )}
+                    {comment.gif && <GifAttachment gif={comment.gif} size="comment" />}
                     {/* The note is signed under it, the way a margin note is. */}
                     <div className="flex items-baseline gap-1.5 mt-0.5 text-[10px] text-muted">
                       {!isAnonymous && comment.author_name && (
@@ -174,6 +234,7 @@ export function CommentThread({
                             <button
                               onClick={() => {
                                 setEditDraft(comment.content);
+                                setEditGif(comment.gif);
                                 setEditingId(comment.id);
                               }}
                               className="hover:text-ink"
@@ -215,22 +276,35 @@ export function CommentThread({
         maxLength={MAX_COMMENT_LENGTH}
         className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 placeholder:text-muted"
       />
-      {draft.trim() && (
-        <div className="flex items-center justify-end gap-2 mt-1">
+
+      {draftGif && (
+        <div className="flex">
+          <GifAttachment gif={draftGif} size="comment" onRemove={() => setDraftGif(null)} />
+        </div>
+      )}
+
+      {(canSend || draftHint) && (
+        <div className="flex items-center gap-2 mt-1">
+          {draftHint}
           {remaining <= COUNTDOWN_FROM && (
-            <span className={`text-[10px] ${remaining < 0 ? "text-red-500" : "text-muted"}`}>
+            <span
+              className={`ml-auto text-[10px] ${remaining < 0 ? "text-red-500" : "text-muted"}`}
+            >
               {remaining} left
             </span>
           )}
-          <button
-            onClick={handleSend}
-            disabled={!canSend}
-            className="text-xs px-2.5 py-1 rounded-md bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-40"
-          >
-            Add comment
-          </button>
+          {canSend && (
+            <button
+              onClick={handleSend}
+              className="ml-auto text-xs px-2.5 py-1 rounded-md bg-accent text-white hover:bg-accent-hover transition-colors"
+            >
+              Add comment
+            </button>
+          )}
         </div>
       )}
+
+      {draftPicker}
     </div>
   );
 }

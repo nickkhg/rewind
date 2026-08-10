@@ -97,6 +97,11 @@ spec:
                   key: postgres-database
             - name: DATABASE_URL
               value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):5432/$(POSTGRES_DB)"
+            - name: GIPHY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: giphy-api-key
             - name: PORT
               value: {{ .Values.env.port | quote }}
             - name: STATIC_DIR

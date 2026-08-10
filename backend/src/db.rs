@@ -4,10 +4,20 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 
 use crate::models::{
-    ActionSourceBoard, Board, Column, Comment, EditorRequestView, EditorView, ImportResult,
+    ActionSourceBoard, Board, Column, Comment, EditorRequestView, EditorView, Gif, ImportResult,
     LabelCount, Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
 };
 use crate::state::MergeSnapshot;
+
+/// The columns that every read of a card asks for, in one place so that a new column
+/// reaches every query at once.
+const TICKET_COLUMNS: &str = "id, column_id, content, author_id, author_name, created_at, \
+     carried_from_board_id, carried_from_board_title, \
+     gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title";
+
+/// The same list for a comment.
+const COMMENT_COLUMNS: &str = "id, ticket_id, content, author_id, author_name, created_at, \
+     gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title";
 
 // --- Board ---
 
@@ -111,7 +121,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         Vec::new()
     } else {
         sqlx::query_as::<_, TicketRow>(
-            "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE column_id = ANY($1) ORDER BY created_at",
+            &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE column_id = ANY($1) ORDER BY created_at"),
         )
         .bind(&col_ids)
         .fetch_all(pool)
@@ -136,7 +146,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         Vec::new()
     } else {
         sqlx::query_as::<_, CommentRow>(
-            "SELECT id, ticket_id, content, author_id, author_name, created_at FROM ticket_comments WHERE ticket_id = ANY($1) ORDER BY created_at",
+            &format!("SELECT {COMMENT_COLUMNS} FROM ticket_comments WHERE ticket_id = ANY($1) ORDER BY created_at"),
         )
         .bind(&ticket_ids)
         .fetch_all(pool)
@@ -156,22 +166,25 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
     // Group comments by ticket_id. They keep the order of the query: oldest first.
     let mut comments_map: std::collections::HashMap<String, Vec<Comment>> =
         std::collections::HashMap::new();
-    for c in comment_rows {
+    for mut c in comment_rows {
+        let gif = c.take_gif();
         comments_map.entry(c.ticket_id).or_default().push(Comment {
             id: c.id,
             content: c.content,
             author_id: c.author_id,
             author_name: c.author_name,
             created_at: c.created_at,
+            gif,
         });
     }
 
     // Group tickets by column_id
     let mut tickets_map: std::collections::HashMap<String, Vec<Ticket>> =
         std::collections::HashMap::new();
-    for t in ticket_rows {
+    for mut t in ticket_rows {
         let votes = votes_map.remove(&t.id).unwrap_or_default();
         let comments = comments_map.remove(&t.id).unwrap_or_default();
+        let gif = t.take_gif();
         tickets_map.entry(t.column_id.clone()).or_default().push(Ticket {
             id: t.id,
             content: t.content,
@@ -182,6 +195,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             carried_from_board_id: t.carried_from_board_id,
             carried_from_board_title: t.carried_from_board_title,
             comments,
+            gif,
         });
     }
 
@@ -374,9 +388,13 @@ pub async fn add_ticket(
     author_id: &str,
     author_name: &str,
     created_at: DateTime<Utc>,
+    gif: Option<&Gif>,
 ) -> Result<(), sqlx::Error> {
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif);
     sqlx::query(
-        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
+         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(ticket_id)
     .bind(column_id)
@@ -384,6 +402,12 @@ pub async fn add_ticket(
     .bind(author_id)
     .bind(author_name)
     .bind(created_at)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
     .execute(pool)
     .await?;
     Ok(())
@@ -401,12 +425,23 @@ pub async fn edit_ticket(
     pool: &PgPool,
     ticket_id: &str,
     content: &str,
+    gif: Option<&Gif>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE tickets SET content = $1 WHERE id = $2")
-        .bind(content)
-        .bind(ticket_id)
-        .execute(pool)
-        .await?;
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif);
+    sqlx::query(
+        "UPDATE tickets SET content = $1, gif_id = $2, gif_url = $3, gif_still_url = $4, \
+         gif_width = $5, gif_height = $6, gif_title = $7 WHERE id = $8",
+    )
+    .bind(content)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
+    .bind(ticket_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -462,9 +497,13 @@ pub async fn add_comment(
     author_id: &str,
     author_name: &str,
     created_at: DateTime<Utc>,
+    gif: Option<&Gif>,
 ) -> Result<(), sqlx::Error> {
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif);
     sqlx::query(
-        "INSERT INTO ticket_comments (id, ticket_id, content, author_id, author_name, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO ticket_comments (id, ticket_id, content, author_id, author_name, created_at, \
+         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(comment_id)
     .bind(ticket_id)
@@ -472,6 +511,12 @@ pub async fn add_comment(
     .bind(author_id)
     .bind(author_name)
     .bind(created_at)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
     .execute(pool)
     .await?;
     Ok(())
@@ -481,12 +526,23 @@ pub async fn edit_comment(
     pool: &PgPool,
     comment_id: &str,
     content: &str,
+    gif: Option<&Gif>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE ticket_comments SET content = $1 WHERE id = $2")
-        .bind(content)
-        .bind(comment_id)
-        .execute(pool)
-        .await?;
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif);
+    sqlx::query(
+        "UPDATE ticket_comments SET content = $1, gif_id = $2, gif_url = $3, gif_still_url = $4, \
+         gif_width = $5, gif_height = $6, gif_title = $7 WHERE id = $8",
+    )
+    .bind(content)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
+    .bind(comment_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -554,23 +610,25 @@ pub async fn merge_tickets(
 
     // Fetch both tickets
     let source = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE id = $1",
+        &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE id = $1"),
     )
     .bind(source_id)
     .fetch_optional(&mut *tx)
     .await?;
 
     let target = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE id = $1",
+        &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE id = $1"),
     )
     .bind(target_id)
     .fetch_optional(&mut *tx)
     .await?;
 
-    let (source, target) = match (source, target) {
+    let (mut source, mut target) = match (source, target) {
         (Some(s), Some(t)) => (s, t),
         _ => return Ok(None),
     };
+    let source_gif = source.take_gif();
+    let target_gif = target.take_gif();
 
     // Fetch source votes
     let source_votes: Vec<VoteRow> =
@@ -592,12 +650,26 @@ pub async fn merge_tickets(
     // Combined content
     let combined = format!("{}\n---\n{}", target.content, source.content);
 
+    // A card holds one GIF. The target keeps its own; an empty target takes the one from the
+    // source, so that the picture is not lost with the card it came on.
+    let merged_gif = target_gif.clone().or_else(|| source_gif.clone());
+
     // Update target content
-    sqlx::query("UPDATE tickets SET content = $1 WHERE id = $2")
-        .bind(&combined)
-        .bind(target_id)
-        .execute(&mut *tx)
-        .await?;
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(merged_gif.as_ref());
+    sqlx::query(
+        "UPDATE tickets SET content = $1, gif_id = $2, gif_url = $3, gif_still_url = $4, \
+         gif_width = $5, gif_height = $6, gif_title = $7 WHERE id = $8",
+    )
+    .bind(&combined)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
+    .bind(target_id)
+    .execute(&mut *tx)
+    .await?;
 
     // Copy source votes to target (union — skip duplicates)
     for voter_id in &source_vote_ids {
@@ -636,24 +708,40 @@ pub async fn merge_tickets(
         source_carried_from_board_id: source.carried_from_board_id,
         source_carried_from_board_title: source.carried_from_board_title,
         source_comment_ids,
+        source_gif,
         target_id: target.id,
         target_original_content: target.content,
+        target_original_gif: target_gif,
     }))
 }
 
 pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    // Restore target's original content
-    sqlx::query("UPDATE tickets SET content = $1 WHERE id = $2")
-        .bind(&snapshot.target_original_content)
-        .bind(&snapshot.target_id)
-        .execute(&mut *tx)
-        .await?;
-
-    // Re-create source ticket
+    // Restore target's original content, and with it the GIF the target had before the merge
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(snapshot.target_original_gif.as_ref());
     sqlx::query(
-        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        "UPDATE tickets SET content = $1, gif_id = $2, gif_url = $3, gif_still_url = $4, \
+         gif_width = $5, gif_height = $6, gif_title = $7 WHERE id = $8",
+    )
+    .bind(&snapshot.target_original_content)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
+    .bind(&snapshot.target_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Re-create source ticket, GIF and all
+    let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(snapshot.source_gif.as_ref());
+    sqlx::query(
+        "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
+         carried_from_board_id, carried_from_board_title, \
+         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(&snapshot.source_id)
     .bind(&snapshot.source_column_id)
@@ -663,6 +751,12 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .bind(snapshot.source_created_at)
     .bind(&snapshot.source_carried_from_board_id)
     .bind(&snapshot.source_carried_from_board_title)
+    .bind(gid)
+    .bind(gurl)
+    .bind(gstill)
+    .bind(gw)
+    .bind(gh)
+    .bind(gtitle)
     .execute(&mut *tx)
     .await?;
 
@@ -701,7 +795,7 @@ pub async fn split_ticket(
     let mut tx = pool.begin().await?;
 
     let ticket = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE id = $1",
+        &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE id = $1"),
     )
     .bind(ticket_id)
     .fetch_optional(&mut *tx)
@@ -1299,7 +1393,7 @@ pub async fn copy_actions(
     .unwrap_or(false);
 
     let source_tickets = sqlx::query_as::<_, TicketRow>(
-        "SELECT id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title FROM tickets WHERE column_id = $1 ORDER BY created_at",
+        &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE column_id = $1 ORDER BY created_at"),
     )
     .bind(&source_column.id)
     .fetch_all(&mut *tx)
@@ -1317,20 +1411,26 @@ pub async fn copy_actions(
     let mut imported = 0usize;
     let mut skipped = 0usize;
 
-    for ticket in source_tickets {
+    for mut ticket in source_tickets {
         if !existing.insert(ticket.content.trim().to_string()) {
             skipped += 1;
             continue;
         }
 
+        // The GIF comes across with the action, so the record of the last retro reads the same way.
+        let gif = ticket.take_gif();
         let author_name = if target_anonymous {
             String::new()
         } else {
             ticket.author_name
         };
 
+        let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif.as_ref());
         sqlx::query(
-            "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, carried_from_board_id, carried_from_board_title) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
+             carried_from_board_id, carried_from_board_title, \
+             gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
         )
         .bind(nanoid!(8))
         .bind(&target_column.id)
@@ -1340,6 +1440,12 @@ pub async fn copy_actions(
         .bind(Utc::now())
         .bind(source_board_id)
         .bind(&source_title.title)
+        .bind(gid)
+        .bind(gurl)
+        .bind(gstill)
+        .bind(gw)
+        .bind(gh)
+        .bind(gtitle)
         .execute(&mut *tx)
         .await?;
 
@@ -1478,6 +1584,83 @@ struct TicketRow {
     created_at: DateTime<Utc>,
     carried_from_board_id: Option<String>,
     carried_from_board_title: Option<String>,
+    gif_id: Option<String>,
+    gif_url: Option<String>,
+    gif_still_url: Option<String>,
+    gif_width: Option<i32>,
+    gif_height: Option<i32>,
+    gif_title: Option<String>,
+}
+
+impl TicketRow {
+    fn take_gif(&mut self) -> Option<Gif> {
+        row_gif(
+            self.gif_id.take(),
+            self.gif_url.take(),
+            self.gif_still_url.take(),
+            self.gif_width.take(),
+            self.gif_height.take(),
+            self.gif_title.take(),
+        )
+    }
+}
+
+impl CommentRow {
+    fn take_gif(&mut self) -> Option<Gif> {
+        row_gif(
+            self.gif_id.take(),
+            self.gif_url.take(),
+            self.gif_still_url.take(),
+            self.gif_width.take(),
+            self.gif_height.take(),
+            self.gif_title.take(),
+        )
+    }
+}
+
+/// Puts the six GIF columns of a row back together. A row that holds only part of a GIF
+/// gives None, so a half-written picture never reaches the board.
+fn row_gif(
+    id: Option<String>,
+    url: Option<String>,
+    still_url: Option<String>,
+    width: Option<i32>,
+    height: Option<i32>,
+    title: Option<String>,
+) -> Option<Gif> {
+    Some(Gif {
+        id: id?,
+        url: url?,
+        still_url: still_url?,
+        width: width?,
+        height: height?,
+        title: title?,
+    })
+}
+
+/// Spreads a GIF into the six values that the INSERT and UPDATE statements bind,
+/// so that a card with no GIF binds six nulls.
+fn gif_binds(
+    gif: Option<&Gif>,
+) -> (
+    Option<&str>,
+    Option<&str>,
+    Option<&str>,
+    Option<i32>,
+    Option<i32>,
+    Option<&str>,
+) {
+    match gif {
+        Some(g) => (
+            Some(g.id.as_str()),
+            Some(g.url.as_str()),
+            Some(g.still_url.as_str()),
+            Some(g.width),
+            Some(g.height),
+            Some(g.title.as_str()),
+        ),
+        None => (None, None, None, None, None, None),
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -1494,6 +1677,12 @@ struct CommentRow {
     author_id: String,
     author_name: String,
     created_at: DateTime<Utc>,
+    gif_id: Option<String>,
+    gif_url: Option<String>,
+    gif_still_url: Option<String>,
+    gif_width: Option<i32>,
+    gif_height: Option<i32>,
+    gif_title: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]

@@ -7,7 +7,7 @@ use nanoid::nanoid;
 use tracing::{info, warn};
 
 use crate::db;
-use crate::models::{Participant, MAX_COMMENT_LENGTH};
+use crate::models::{sanitize_gif, Participant, MAX_COMMENT_LENGTH};
 use crate::protocol::{ClientMessage, ServerMessage};
 use crate::state::AppState;
 use chrono::Utc;
@@ -271,11 +271,14 @@ async fn handle_socket(
     info!(participant_id, board_id, "participant left");
 }
 
-/// Removes the space at the two ends of a comment. Gives None if nothing is left,
-/// or if the comment is longer than the limit.
-fn clean_comment(content: &str) -> Option<String> {
+/// Removes the space at the two ends of a comment. Gives None if the comment is longer than
+/// the limit, or if it is empty and carries no GIF: a GIF on its own is a whole remark.
+fn clean_comment(content: &str, has_gif: bool) -> Option<String> {
     let trimmed = content.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > MAX_COMMENT_LENGTH {
+    if trimmed.chars().count() > MAX_COMMENT_LENGTH {
+        return None;
+    }
+    if trimmed.is_empty() && !has_gif {
         return None;
     }
     Some(trimmed.to_string())
@@ -298,11 +301,23 @@ async fn handle_message(
     match msg {
         ClientMessage::Join { .. } => false,
 
-        ClientMessage::AddTicket { column_id, content } => {
+        ClientMessage::AddTicket {
+            column_id,
+            content,
+            gif,
+        } => {
             // Verify column belongs to this board
             match db::column_belongs_to_board(&state.db, &column_id, board_id).await {
                 Ok(true) => {}
                 _ => return false,
+            }
+
+            // The client chooses the picture, so the server checks it before it keeps it.
+            let gif = gif.and_then(sanitize_gif);
+
+            // A card is either words or a picture. Empty on both counts is nothing at all.
+            if content.trim().is_empty() && gif.is_none() {
+                return false;
             }
 
             let ticket_id = nanoid!(8);
@@ -310,10 +325,11 @@ async fn handle_message(
                 &state.db,
                 &ticket_id,
                 &column_id,
-                &content,
+                content.trim(),
                 participant_id,
                 participant_name,
                 Utc::now(),
+                gif.as_ref(),
             )
             .await
             {
@@ -341,14 +357,23 @@ async fn handle_message(
             }
         }
 
-        ClientMessage::EditTicket { ticket_id, content } => {
+        ClientMessage::EditTicket {
+            ticket_id,
+            content,
+            gif,
+        } => {
             // Only author can edit
             match db::get_ticket_author(&state.db, &ticket_id).await {
                 Ok(Some(author_id)) if author_id == participant_id => {}
                 _ => return false,
             }
 
-            match db::edit_ticket(&state.db, &ticket_id, &content).await {
+            let gif = gif.and_then(sanitize_gif);
+            if content.trim().is_empty() && gif.is_none() {
+                return false;
+            }
+
+            match db::edit_ticket(&state.db, &ticket_id, content.trim(), gif.as_ref()).await {
                 Ok(()) => true,
                 Err(e) => {
                     warn!("Failed to edit ticket: {e}");
@@ -391,14 +416,19 @@ async fn handle_message(
             }
         }
 
-        ClientMessage::AddComment { ticket_id, content } => {
+        ClientMessage::AddComment {
+            ticket_id,
+            content,
+            gif,
+        } => {
             // Anyone on the board can comment, but only on a card of this board
             match db::ticket_belongs_to_board(&state.db, &ticket_id, board_id).await {
                 Ok(true) => {}
                 _ => return false,
             }
 
-            let Some(content) = clean_comment(&content) else {
+            let gif = gif.and_then(sanitize_gif);
+            let Some(content) = clean_comment(&content, gif.is_some()) else {
                 return false;
             };
 
@@ -411,6 +441,7 @@ async fn handle_message(
                 participant_id,
                 participant_name,
                 Utc::now(),
+                gif.as_ref(),
             )
             .await
             {
@@ -422,18 +453,23 @@ async fn handle_message(
             }
         }
 
-        ClientMessage::EditComment { comment_id, content } => {
+        ClientMessage::EditComment {
+            comment_id,
+            content,
+            gif,
+        } => {
             // Only the author can edit, and only on this board
             match db::get_comment_author_on_board(&state.db, &comment_id, board_id).await {
                 Ok(Some(author_id)) if author_id == participant_id => {}
                 _ => return false,
             }
 
-            let Some(content) = clean_comment(&content) else {
+            let gif = gif.and_then(sanitize_gif);
+            let Some(content) = clean_comment(&content, gif.is_some()) else {
                 return false;
             };
 
-            match db::edit_comment(&state.db, &comment_id, &content).await {
+            match db::edit_comment(&state.db, &comment_id, &content, gif.as_ref()).await {
                 Ok(()) => true,
                 Err(e) => {
                     warn!("Failed to edit comment: {e}");

@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { useBoardStore } from "../../store/boardStore";
+import { useGifComposer } from "../../hooks/useGifComposer";
 import { VoteButton } from "./VoteButton";
 import { CommentThread, CommentToggle } from "./CommentThread";
+import { GifAttachment } from "./GifAttachment";
 import type { Ticket as TicketType, ClientMessage, ColumnRole } from "../../lib/types";
 
 interface TicketProps {
@@ -34,8 +36,24 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
   const [splitOpen, setSplitOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const splitRef = useRef<HTMLDivElement>(null);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+  const [editGif, setEditGif] = useState<TicketType["gif"]>(ticket.gif);
   const threadId = `comments-${ticket.id}`;
   const comments = ticket.comments ?? [];
+
+  // The editor can search for a GIF the same way the card was written.
+  const {
+    picker: editPicker,
+    hint: editHint,
+    text: editText,
+  } = useGifComposer({
+    value: editContent,
+    onChange: setEditContent,
+    gif: editGif,
+    onGifChange: setEditGif,
+    anchor: editRef.current,
+    focus: () => editRef.current?.focus(),
+  });
 
   const segments = ticket.content.split("\n---\n");
   const isMerged = segments.length > 1;
@@ -57,9 +75,17 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
   }
 
   function handleSaveEdit() {
-    const trimmed = editContent.trim();
-    if (trimmed && trimmed !== ticket.content) {
-      send({ type: "EditTicket", payload: { ticket_id: ticket.id, content: trimmed } });
+    // A card has to keep something. Nothing at all leaves it as it was.
+    if (!editText && !editGif) {
+      setEditing(false);
+      return;
+    }
+    const changed = editText !== ticket.content || editGif?.id !== ticket.gif?.id;
+    if (changed) {
+      send({
+        type: "EditTicket",
+        payload: { ticket_id: ticket.id, content: editText, gif: editGif },
+      });
     }
     setEditing(false);
   }
@@ -108,6 +134,7 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
       {editing ? (
         <div>
           <textarea
+            ref={editRef}
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
             onKeyDown={(e) => {
@@ -121,14 +148,21 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
             className="w-full rounded border border-border px-2 py-1 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 bg-surface"
             autoFocus
           />
-          <div className="flex gap-1 mt-1">
+          {editGif && (
+            <div className="flex">
+              <GifAttachment gif={editGif} size="card" onRemove={() => setEditGif(null)} />
+            </div>
+          )}
+          <div className="flex items-center gap-2 mt-1">
             <button onClick={handleSaveEdit} className="text-xs text-accent hover:underline">
               Save
             </button>
             <button onClick={() => setEditing(false)} className="text-xs text-muted hover:underline">
               Cancel
             </button>
+            {editHint && <span className="ml-auto">{editHint}</span>}
           </div>
+          {editPicker}
         </div>
       ) : (
         <div className="relative">
@@ -149,6 +183,8 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
               {"\ud83d\udea8 Hacker alert! Did you really think this would work?"}
             </p>
           )}
+          {/* The picture carries the point as much as the words, so it hides with them. */}
+          {ticket.gif && <GifAttachment gif={ticket.gif} size="card" blurred={isBlurred} />}
         </div>
       )}
 
@@ -235,6 +271,7 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
                 <button
                   onClick={() => {
                     setEditContent(ticket.content);
+                    setEditGif(ticket.gif);
                     setEditing(true);
                   }}
                   className="text-xs text-muted hover:text-ink"

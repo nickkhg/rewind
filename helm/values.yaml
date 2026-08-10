@@ -62,6 +62,12 @@ resources: {}
 secrets:
   # Plaintext admin token; leave empty to disable the admin interface
   adminToken: ""
+  # GIPHY web SDK key; leave empty to turn the GIF controls off.
+  # The server passes this key to the browser at GET /api/config, because the GIPHY web SDK
+  # calls GIPHY from the client. The key is therefore visible to anyone who uses the board.
+  # Keeping it here holds it out of the image and out of git, and lets it rotate without a
+  # rebuild, but it does not hide it from end users — use a domain-restricted key.
+  giphyApiKey: ""
 
 env:
   port: "3001"
