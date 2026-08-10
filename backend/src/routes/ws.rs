@@ -347,6 +347,40 @@ async fn handle_message(
             }
         }
 
+        ClientMessage::MoveTicket {
+            ticket_id,
+            column_id,
+        } => {
+            // The card and the target column must both belong to this board
+            match db::column_belongs_to_board(&state.db, &column_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
+            match db::get_ticket_column_id(&state.db, &ticket_id).await {
+                Ok(Some(current)) => {
+                    match db::column_belongs_to_board(&state.db, &current, board_id).await {
+                        Ok(true) => {}
+                        _ => return false,
+                    }
+                }
+                _ => return false,
+            }
+
+            // Authorization: author, facilitator, or editor
+            match db::get_ticket_author(&state.db, &ticket_id).await {
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
+                _ => return false,
+            }
+
+            match db::move_ticket(&state.db, &ticket_id, &column_id).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to move ticket: {e}");
+                    false
+                }
+            }
+        }
+
         ClientMessage::ToggleVote { ticket_id } => {
             // Check vote limit before adding a vote
             let already_voted = match db::has_vote(&state.db, &ticket_id, participant_id).await {
