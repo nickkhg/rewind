@@ -96,5 +96,16 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
   moves the comments of the source card onto the target card, and an undo sends them back.
 - **Card rotation** is seeded from ticket ID hash (deterministic, -1° to 1°).
 - **Blur** is CSS `filter: blur(8px)` with 500ms transition. Authors always see their own cards.
+- **A hidden card holds no words on the client.** The blur is a picture, not a lock: a reader who
+  opens the network panel reads through it. So `BoardView::redact_hidden_for` puts filler in the
+  place of the text of every card the reader may not read yet, and of the author name and the
+  comments with it. `models::mask_text` keeps the shape — same characters, same spaces, same line
+  breaks — so the board under the blur looks as it always did. GIFs go out whole, because the
+  browser hides the picture and a card that lost it would change shape when the board opens.
+  The reader keeps their own cards, the carried actions, and everything on a board that is open;
+  the facilitator and the editors keep it all, which is what makes the peek work.
+  The redaction sits on the way out to each client, not in the broadcast: `routes/ws.rs` runs it
+  in the per-client send task and on the first state after Join, and `GET /api/boards/{id}` runs
+  it too, since that route names no participant and would otherwise hand over the whole board.
 - **Sorting** is client-side only (not synced): "newest" or "most-votes" in `utils/sort.ts`.
 - **Tailwind v4** with `@theme` block in `global.css` for custom properties. Fonts loaded via Google Fonts `<link>` in `index.html`.

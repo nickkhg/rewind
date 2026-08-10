@@ -92,6 +92,7 @@ pub async fn create_board(
 
 pub async fn get_board(
     State(state): State<AppState>,
+    jar: CookieJar,
     Path(board_id): Path<String>,
 ) -> Result<Json<crate::models::BoardView>, AppError> {
     let board = db::get_board(&state.db, &board_id)
@@ -101,7 +102,16 @@ pub async fn get_board(
     let count = state.participant_count(&board_id).await;
     let editors = db::get_board_editors(&state.db, &board_id).await.unwrap_or_default();
     let editor_requests = db::get_editor_requests(&state.db, &board_id).await.unwrap_or_default();
-    Ok(Json(board.to_view_with_participants(count, editors, editor_requests)))
+    let mut view = board.to_view_with_participants(count, editors, editor_requests);
+
+    // This route names no participant, so it can hold no cards of its own. Only the facilitator
+    // reads a blurred board here; for everyone else the words stay on the server.
+    let facilitator_id = jar.get("facilitator_id").map(|c| c.value());
+    let is_facilitator =
+        db::is_board_privileged(&state.db, &board_id, None, facilitator_id, None).await?;
+    view.redact_hidden_for("", is_facilitator);
+
+    Ok(Json(view))
 }
 
 pub async fn list_templates(
