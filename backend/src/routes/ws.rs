@@ -720,6 +720,30 @@ async fn handle_message(
             }
         }
 
+        ClientMessage::SetTicketDone { ticket_id, done } => {
+            // Only an action can be finished. A board keeps its two action columns, so this check
+            // also keeps one board out of the cards of another.
+            match db::ticket_in_action_column(&state.db, &ticket_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
+
+            // Author, facilitator, or editor, as with a move and with the rock status.
+            match db::get_ticket_author(&state.db, &ticket_id).await {
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
+                _ => return false,
+            }
+
+            let done_at = if done { Some(Utc::now()) } else { None };
+            match db::set_ticket_done(&state.db, &ticket_id, done_at).await {
+                Ok(()) => true,
+                Err(e) => {
+                    warn!("Failed to set the done mark: {e}");
+                    false
+                }
+            }
+        }
+
         ClientMessage::SetRockStatus { ticket_id, status } => {
             if let Some(ref status) = status {
                 if !valid_rock_status(status) {

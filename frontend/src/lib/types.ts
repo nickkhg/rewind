@@ -56,6 +56,11 @@ export interface Ticket {
   gif: Gif | null;
   /** Where the rock stands. Null on every card outside the Rocks column. */
   rock_status: RockStatus | null;
+  /**
+   * When the action was closed. Null on an open action and on every card outside the two
+   * action columns. A finished action stays on the board: the mark is what closes it.
+   */
+  done_at: string | null;
 }
 
 /** Where a rock stands. Null until someone marks it. */
@@ -176,6 +181,7 @@ export type ClientMessage =
   | { type: "SetVoteLimit"; payload: { limit: number | null } }
   | { type: "StartTimer"; payload: { duration_secs: number } }
   | { type: "StopTimer" }
+  | { type: "SetTicketDone"; payload: { ticket_id: string; done: boolean } }
   | { type: "SetRockStatus"; payload: { ticket_id: string; status?: RockStatus | null } }
   | { type: "RateMeeting"; payload: { rating: number } }
   | { type: "AddScorecardMetric"; payload: { name: string; goal: string } }
@@ -279,6 +285,18 @@ export const COLUMN_ROLE_COLORS: Record<ColumnRole, string> = {
   actions: "#f6cabb",
   rocks: "#c7d6c0",
 };
+
+/**
+ * The edge a finished action carries, in place of the color of its column. Both action columns
+ * have a fixed color of their own, so nothing is lost by the swap, and a done card reads as
+ * done from the far end of the room.
+ */
+export const DONE_EDGE_COLOR = "#5f9e6e";
+
+/** The two columns whose cards can be marked done. The backend applies the same rule. */
+export function isActionColumn(role: ColumnRole | null | undefined): boolean {
+  return role === "actions" || role === "previous_actions";
+}
 
 export const COLUMN_ROLE_NAMES: Record<ColumnRole, string> = {
   previous_actions: "Previous Actions",

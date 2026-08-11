@@ -62,6 +62,7 @@ export function Column({ column, color, send }: ColumnProps) {
             ticket={ticket}
             color={color}
             columnId={column.id}
+            columnName={column.name}
             columnRole={column.role}
             voteLimitReached={voteLimitReached}
             isBlurred={isBlurred && !isArchive}

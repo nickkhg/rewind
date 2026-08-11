@@ -37,7 +37,7 @@ Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri
 
 Messages are serde-tagged enums: `#[serde(tag = "type", content = "payload")]`. TypeScript mirrors this as discriminated unions in `lib/types.ts`.
 
-Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`, `SetRockStatus`, `RateMeeting`, `AddScorecardMetric`, `UpdateScorecardMetric`, `RemoveScorecardMetric`
+Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`, `SetTicketDone`, `SetRockStatus`, `RateMeeting`, `AddScorecardMetric`, `UpdateScorecardMetric`, `RemoveScorecardMetric`
 Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `Error`
 
 `AddTicket`, `EditTicket`, `AddComment` and `EditComment` each carry an optional `gif`. The client sends the whole state it wants, so an edit that leaves `gif` out takes the picture off the card.
@@ -55,6 +55,41 @@ The facilitator or an editor copies the actions of any other board into Previous
 - `PUT /api/boards/{id}/labels` and `GET /api/labels` manage the board labels. Labels are free text, kept lower case, six per board at most (`normalize_labels` in `models.rs`).
 
 REST carries these three, not the WebSocket protocol, because each one answers the caller with a result or an error. `db::is_board_privileged` applies the same rule as the WebSocket handler: facilitator token, facilitator cookie, or a place in the editor list.
+
+## Closing an Action
+
+An action that is finished stays on the board. `tickets.done_at` holds when it was closed, or
+NULL while it is open; the time, not a flag, so a card can say when the team shut it. `SetTicketDone`
+asks the author or a privileged user, and the server refuses a card that does not sit in a column
+whose role is one of `DONE_COLUMN_ROLES` (`models.rs`) — `actions` or `previous_actions`. Every
+board has both, so the same check that keeps the mark on actions also keeps one board out of the
+cards of another. An observation is never finished, so a free-text column reads NULL forever.
+
+- **A done action is carried done.** `copy_actions` brings `done_at` across with the card, because
+  Previous Actions is the record of the last retro and the record has to say which of the actions
+  the team closed. A split leaves the new card open, and a merge keeps the mark of the target and
+  puts the mark of the source in `MergeSnapshot`, as it does with the rock status.
+- **The mark is not redacted.** A blurred card carries no done control, the rule the comment and
+  the rock controls follow, but `done_at` itself goes out whole.
+- **On the card** the closed action takes a green edge in place of the color of its column, a wash
+  of the same green mixed into whichever paper it sits on, and lower opacity that lifts on hover.
+  Both action columns have a fixed color, so the swapped edge costs no information.
+
+## Opening a Card
+
+A column is narrow, so a card on the board says as little as it can. `TicketModal` holds the rest:
+the whole of a long card, the parts of a merged one set apart with a rule and a **Split out** control
+each, the meta line, and the conversation. Clicking the card opens it; so does the comment mark in
+the footer, which then puts the caret in the composer. A blurred card does not open.
+
+- **The comments live here alone.** A card on the board carries the count and none of the words.
+- The panel keeps the colored edge of the card as a spine down its whole height, and takes the
+  eyebrow of its column — the dot and the name, as the column header has them.
+- Escape closes it, so does the backdrop; the page behind is held still, Tab runs a ring inside the
+  panel, and focus goes back where it came from. The scrim is `--color-scrim`, which darkens on both
+  papers: a light veil over a dark board reads as fog rather than as depth.
+- `useTicketPermissions` answers who may do what. The card and the modal ask the same question of
+  the same board, so the two never disagree. `TicketEditor` is the one edit field both of them open.
 
 ## Level 10 Boards
 
@@ -128,10 +163,12 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
 - **Vite proxy:** `/api` and `/ws` routes proxy to `localhost:3001` in dev (`vite.config.ts`), so both web and Tauri use relative URLs. `VITE_API_URL` env var overrides for production.
 - **Column colors** are hex strings in `COLUMN_COLORS` array (`lib/types.ts`), passed as props to Column/Ticket components and applied via inline `style`. The two role columns take their own colors from `COLUMN_ROLE_COLORS`; `utils/columnColors.ts` runs the sticky colors across the other columns only.
 - **Previous Actions cards** never blur and take no votes. They are a record of the last retro, not fresh input.
-- **Comments** hang under a card in a recessed strip that opens from the footer mark. A card that
-  is blurred for you shows no comment control, because you cannot read the card yet. Anyone can
-  comment, the writer can edit, and the writer, the facilitator, or an editor can delete. A merge
-  moves the comments of the source card onto the target card, and an undo sends them back.
+- **Comments** live in the card modal, set as notes in the margin: a pen mark in the color of the
+  column, the remark, and the writer signed under it. The card on the board carries the count only,
+  on the mark in its footer that opens the card. A card that is blurred for you shows no comment
+  control, because you cannot read the card yet. Anyone can comment, the writer can edit, and the
+  writer, the facilitator, or an editor can delete. A merge moves the comments of the source card
+  onto the target card, and an undo sends them back.
 - **Card rotation** is seeded from ticket ID hash (deterministic, -1° to 1°).
 - **Blur** is CSS `filter: blur(8px)` with 500ms transition. Authors always see their own cards.
 - **A hidden card holds no words on the client.** The blur is a picture, not a lock: a reader who

@@ -27,6 +27,8 @@ pub struct MergeSnapshot {
     /// The rock status of the source card. A merge keeps the mark of the target,
     /// so this one only comes back with the undo.
     pub source_rock_status: Option<String>,
+    /// When the source action was closed, for the same reason as the rock status above.
+    pub source_done_at: Option<DateTime<Utc>>,
     pub target_id: String,
     pub target_original_content: String,
     pub target_original_gif: Option<Gif>,

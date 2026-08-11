@@ -1,62 +1,59 @@
 import { useState, useRef, useEffect } from "react";
 import { useBoardStore } from "../../store/boardStore";
-import { useGifComposer } from "../../hooks/useGifComposer";
+import { useTicketPermissions } from "../../hooks/useTicketPermissions";
 import { VoteButton } from "./VoteButton";
-import { CommentThread, CommentToggle } from "./CommentThread";
+import { CommentButton } from "./CommentThread";
+import { DoneToggle } from "./DoneToggle";
 import { GifAttachment } from "./GifAttachment";
 import { RockStatusControl } from "./RockStatusControl";
+import { TicketEditor } from "./TicketEditor";
+import { TicketModal } from "./TicketModal";
+import { DONE_EDGE_COLOR } from "../../lib/types";
 import type { Ticket as TicketType, ClientMessage, ColumnRole } from "../../lib/types";
+
+/** What a click has to miss for it to count as a click on the card itself. */
+const INTERACTIVE = "button, a, input, textarea, select, figure";
 
 interface TicketProps {
   ticket: TicketType;
   color: string;
+  columnName?: string;
   columnRole?: ColumnRole | null;
   voteLimitReached?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }: TicketProps) {
-  const { participantId, isFacilitator, board, facilitatorPeek } = useBoardStore();
-  const isAuthor = ticket.author_id === participantId;
-  const isEditor = !!(board && participantId && board.editors.some((e) => e.participant_id === participantId));
-  const isPrivileged = isFacilitator || isEditor;
-  // A carried action is a record of the last retro, not fresh input: it stays visible and it
-  // takes no votes.
-  const isCarried = columnRole === "previous_actions";
-  // A rock stands for the quarter, so its card carries where it stands.
-  const isRock = columnRole === "rocks";
-  // A card that came from another board is already public. It stays visible after a move too.
-  const fromOtherBoard = isCarried || !!ticket.carried_from_board_title;
-  const isBlurred =
-    board?.is_blurred && !isAuthor && !fromOtherBoard && !(isPrivileged && facilitatorPeek);
-  const hasVoted = participantId ? ticket.votes.includes(participantId) : false;
-  // A carried action that is still open belongs in Actions, so that the next retro gets it again.
-  const actionsColumn = board?.columns.find((c) => c.role === "actions");
+export function TicketCard({
+  ticket,
+  color,
+  columnName,
+  columnRole,
+  voteLimitReached,
+  send,
+}: TicketProps) {
+  const board = useBoardStore((s) => s.board);
+  const {
+    isAuthor,
+    isPrivileged,
+    isCarried,
+    isRock,
+    isAction,
+    isBlurred,
+    canSetDone,
+    hasVoted,
+    actionsColumn,
+  } = useTicketPermissions(ticket, columnRole);
+
   const canKeep = isCarried && isPrivileged && !!actionsColumn;
+  // A finished action stays on the board. It goes quiet instead of going away.
+  const isDone = ticket.done_at !== null;
+  const showDoneMark = isAction && (canSetDone || isDone);
 
   const [editing, setEditing] = useState(false);
-  const [editContent, setEditContent] = useState(ticket.content);
   const [splitOpen, setSplitOpen] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [openCard, setOpenCard] = useState<null | { focusComposer: boolean }>(null);
   const splitRef = useRef<HTMLDivElement>(null);
-  const editRef = useRef<HTMLTextAreaElement>(null);
-  const [editGif, setEditGif] = useState<TicketType["gif"]>(ticket.gif);
-  const threadId = `comments-${ticket.id}`;
   const comments = ticket.comments ?? [];
-
-  // The editor can search for a GIF the same way the card was written.
-  const {
-    picker: editPicker,
-    hint: editHint,
-    text: editText,
-  } = useGifComposer({
-    value: editContent,
-    onChange: setEditContent,
-    gif: editGif,
-    onGifChange: setEditGif,
-    anchor: editRef.current,
-    focus: () => editRef.current?.focus(),
-  });
 
   const segments = ticket.content.split("\n---\n");
   const isMerged = segments.length > 1;
@@ -77,18 +74,9 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
     setSplitOpen(false);
   }
 
-  function handleSaveEdit() {
-    // A card has to keep something. Nothing at all leaves it as it was.
-    if (!editText && !editGif) {
-      setEditing(false);
-      return;
-    }
-    const changed = editText !== ticket.content || editGif?.id !== ticket.gif?.id;
-    if (changed) {
-      send({
-        type: "EditTicket",
-        payload: { ticket_id: ticket.id, content: editText, gif: editGif },
-      });
+  function handleSaveEdit(content: string, gif: TicketType["gif"]) {
+    if (content !== ticket.content || gif?.id !== ticket.gif?.id) {
+      send({ type: "EditTicket", payload: { ticket_id: ticket.id, content, gif } });
     }
     setEditing(false);
   }
@@ -105,20 +93,60 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
     });
   }
 
+  // A card you cannot read yet does not open, and neither does one you are already editing.
+  const canOpen = !isBlurred && !editing;
+
+  function handleCardClick(e: React.MouseEvent) {
+    if (!canOpen) return;
+    if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
+    // Somebody who has just selected words on the card meant to copy them, not to open it.
+    if (window.getSelection()?.toString()) return;
+    setOpenCard({ focusComposer: false });
+  }
+
   return (
     <div
-      className={`animate-card-enter rounded-lg border p-3 relative group ${
+      onClick={handleCardClick}
+      className={`animate-card-enter rounded-lg border p-3 relative group transition-opacity ${
         isCarried ? "bg-canvas border-border" : "bg-surface shadow-sm border-border/60"
+      } ${canOpen ? "cursor-pointer" : ""} ${
+        isDone ? "opacity-[0.62] hover:opacity-100 focus-within:opacity-100" : ""
       }`}
       style={{
         borderLeftWidth: "4px",
-        borderLeftColor: color,
+        borderLeftColor: isDone ? DONE_EDGE_COLOR : color,
+        // The wash of a closed action. It is mixed into whichever paper the card sits on, so it
+        // reads the same on a light board and on a dark one.
+        ...(isDone
+          ? {
+              backgroundColor: `color-mix(in oklab, var(--color-${
+                isCarried ? "canvas" : "surface"
+              }) 92%, ${DONE_EDGE_COLOR})`,
+            }
+          : {}),
         ...(isCarried ? { borderLeftStyle: "dashed" as const } : {}),
       }}
     >
+      {/* The tick that closes an action, in the corner where nothing else sits. */}
+      {showDoneMark && !isBlurred && (
+        <div className="absolute top-2.5 right-2.5 z-10">
+          <DoneToggle
+            ticketId={ticket.id}
+            doneAt={ticket.done_at}
+            canSet={canSetDone}
+            quiet
+            send={send}
+          />
+        </div>
+      )}
+
       {/* Where the carried action came from. It stays with the card after a move to Actions. */}
       {ticket.carried_from_board_title && (
-        <p className="text-[10px] uppercase tracking-wider text-muted mb-1.5 truncate">
+        <p
+          className={`text-[10px] uppercase tracking-wider text-muted mb-1.5 truncate ${
+            showDoneMark ? "pr-7" : ""
+          }`}
+        >
           {ticket.carried_from_board_id ? (
             <a
               href={`/board/${ticket.carried_from_board_id}`}
@@ -135,42 +163,18 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
 
       {/* Content */}
       {editing ? (
-        <div>
-          <textarea
-            ref={editRef}
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSaveEdit();
-              }
-              if (e.key === "Escape") setEditing(false);
-            }}
-            rows={2}
-            className="w-full rounded border border-border px-2 py-1 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 bg-surface"
-            autoFocus
-          />
-          {editGif && (
-            <div className="flex">
-              <GifAttachment gif={editGif} size="card" onRemove={() => setEditGif(null)} />
-            </div>
-          )}
-          <div className="flex items-center gap-2 mt-1">
-            <button onClick={handleSaveEdit} className="text-xs text-accent hover:underline">
-              Save
-            </button>
-            <button onClick={() => setEditing(false)} className="text-xs text-muted hover:underline">
-              Cancel
-            </button>
-            {editHint && <span className="ml-auto">{editHint}</span>}
-          </div>
-          {editPicker}
-        </div>
+        <TicketEditor
+          initialContent={ticket.content}
+          initialGif={ticket.gif}
+          onSave={handleSaveEdit}
+          onCancel={() => setEditing(false)}
+        />
       ) : (
         <div className="relative">
           <p
-            className="text-sm whitespace-pre-wrap transition-[filter] duration-500 ease-out"
+            className={`text-sm whitespace-pre-wrap transition-[filter] duration-500 ease-out ${
+              showDoneMark ? "pr-7" : ""
+            }`}
             style={{
               filter: isBlurred ? "blur(8px)" : "blur(0)",
               ...(isBlurred ? { userSelect: "none", pointerEvents: "none" } as React.CSSProperties : {}),
@@ -183,7 +187,7 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
               className="absolute inset-0 text-sm whitespace-pre-wrap text-transparent"
               aria-hidden
             >
-              {"\ud83d\udea8 Hacker alert! Did you really think this would work?"}
+              {"🚨 Hacker alert! Did you really think this would work?"}
             </p>
           )}
           {/* The picture carries the point as much as the words, so it hides with them. */}
@@ -229,11 +233,9 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
         <div className="flex items-center gap-2">
           {/* A card you cannot read yet takes no discussion either. */}
           {!isBlurred && (
-            <CommentToggle
+            <CommentButton
               count={comments.length}
-              open={commentsOpen}
-              threadId={threadId}
-              onToggle={() => setCommentsOpen((v) => !v)}
+              onOpen={() => setOpenCard({ focusComposer: true })}
             />
           )}
           {!isCarried && (
@@ -283,14 +285,7 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
                 </div>
               )}
               {isAuthor && (
-                <button
-                  onClick={() => {
-                    setEditContent(ticket.content);
-                    setEditGif(ticket.gif);
-                    setEditing(true);
-                  }}
-                  className="text-xs text-muted hover:text-ink"
-                >
+                <button onClick={() => setEditing(true)} className="text-xs text-muted hover:text-ink">
                   Edit
                 </button>
               )}
@@ -302,16 +297,16 @@ export function TicketCard({ ticket, color, columnRole, voteLimitReached, send }
         </div>
       </div>
 
-      {commentsOpen && !isBlurred && (
-        <CommentThread
-          threadId={threadId}
-          ticketId={ticket.id}
-          comments={comments}
+      {openCard && (
+        <TicketModal
+          ticket={ticket}
           color={color}
-          isAnonymous={!!board?.is_anonymous}
-          participantId={participantId}
-          isPrivileged={isPrivileged}
+          columnName={columnName ?? ""}
+          columnRole={columnRole}
+          voteLimitReached={voteLimitReached}
+          focusComposer={openCard.focusComposer}
           send={send}
+          onClose={() => setOpenCard(null)}
         />
       )}
     </div>

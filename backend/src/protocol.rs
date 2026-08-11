@@ -66,6 +66,11 @@ pub enum ClientMessage {
         duration_secs: u32,
     },
     StopTimer,
+    /// Closes an action, or opens it again. Only a card in one of the two action columns.
+    SetTicketDone {
+        ticket_id: String,
+        done: bool,
+    },
     /// Marks a rock on track or off track. Absent takes the mark off the card.
     SetRockStatus {
         ticket_id: String,

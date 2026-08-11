@@ -5,8 +5,8 @@ use std::collections::HashSet;
 
 use crate::models::{
     ActionSourceBoard, Board, Column, Comment, EditorRequestView, EditorView, Gif, ImportResult,
-    LabelCount, MeetingRatingView, ScorecardMetric, Ticket, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS,
-    ROLE_ROCKS, TEMPLATE_LEVEL10,
+    LabelCount, MeetingRatingView, ScorecardMetric, Ticket, DONE_COLUMN_ROLES, ROLE_ACTIONS,
+    ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS, TEMPLATE_LEVEL10,
 };
 use crate::state::MergeSnapshot;
 
@@ -14,7 +14,7 @@ use crate::state::MergeSnapshot;
 /// reaches every query at once.
 const TICKET_COLUMNS: &str = "id, column_id, content, author_id, author_name, created_at, \
      carried_from_board_id, carried_from_board_title, \
-     gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, rock_status";
+     gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, rock_status, done_at";
 
 /// The same list for a comment.
 const COMMENT_COLUMNS: &str = "id, ticket_id, content, author_id, author_name, created_at, \
@@ -203,6 +203,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
             comments,
             gif,
             rock_status: t.rock_status,
+            done_at: t.done_at,
         });
     }
 
@@ -745,6 +746,7 @@ pub async fn merge_tickets(
         source_gif,
         // The target keeps its own mark. The one from the source card waits here for the undo.
         source_rock_status: source.rock_status,
+        source_done_at: source.done_at,
         target_id: target.id,
         target_original_content: target.content,
         target_original_gif: target_gif,
@@ -771,13 +773,13 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .execute(&mut *tx)
     .await?;
 
-    // Re-create source ticket, GIF, rock status and all
+    // Re-create source ticket, GIF, rock status, done mark and all
     let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(snapshot.source_gif.as_ref());
     sqlx::query(
         "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
          carried_from_board_id, carried_from_board_title, \
-         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, rock_status) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+         gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, rock_status, done_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
     )
     .bind(&snapshot.source_id)
     .bind(&snapshot.source_column_id)
@@ -794,6 +796,7 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .bind(gh)
     .bind(gtitle)
     .bind(&snapshot.source_rock_status)
+    .bind(snapshot.source_done_at)
     .execute(&mut *tx)
     .await?;
 
@@ -1462,12 +1465,14 @@ pub async fn copy_actions(
             ticket.author_name
         };
 
+        // A done action comes across done. Previous Actions is the record of the last retro, and
+        // the record has to say which of the actions the team closed.
         let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif.as_ref());
         sqlx::query(
             "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
              carried_from_board_id, carried_from_board_title, \
-             gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
+             gif_id, gif_url, gif_still_url, gif_width, gif_height, gif_title, done_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
         )
         .bind(nanoid!(8))
         .bind(&target_column.id)
@@ -1483,6 +1488,7 @@ pub async fn copy_actions(
         .bind(gw)
         .bind(gh)
         .bind(gtitle)
+        .bind(ticket.done_at)
         .execute(&mut *tx)
         .await?;
 
@@ -1576,6 +1582,39 @@ pub async fn ticket_in_rocks_column(
     .fetch_one(pool)
     .await?;
     Ok(row.count > 0)
+}
+
+/// Tells whether a card sits in one of the two action columns of this board. An action is the
+/// only card that can be finished, so this one check keeps the done mark where it belongs.
+pub async fn ticket_in_action_column(
+    pool: &PgPool,
+    ticket_id: &str,
+    board_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query_as::<_, CountRow>(
+        "SELECT COUNT(*) as count FROM tickets t JOIN columns c ON c.id = t.column_id \
+         WHERE t.id = $1 AND c.board_id = $2 AND c.role = ANY($3)",
+    )
+    .bind(ticket_id)
+    .bind(board_id)
+    .bind(&DONE_COLUMN_ROLES[..])
+    .fetch_one(pool)
+    .await?;
+    Ok(row.count > 0)
+}
+
+/// Closes an action at the given time, or opens it again with None.
+pub async fn set_ticket_done(
+    pool: &PgPool,
+    ticket_id: &str,
+    done_at: Option<DateTime<Utc>>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE tickets SET done_at = $1 WHERE id = $2")
+        .bind(done_at)
+        .bind(ticket_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// Marks a rock on track or off track. None takes the mark off again.
@@ -1798,6 +1837,7 @@ struct TicketRow {
     gif_height: Option<i32>,
     gif_title: Option<String>,
     rock_status: Option<String>,
+    done_at: Option<DateTime<Utc>>,
 }
 
 impl TicketRow {
