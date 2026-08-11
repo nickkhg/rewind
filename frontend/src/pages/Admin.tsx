@@ -147,13 +147,23 @@ function DeleteConfirmDialog({
 
 // --- Template components ---
 
+/** What the template form hands back: the row, and the settings a board from it starts with. */
+interface TemplateFormData {
+  id: string;
+  name: string;
+  description: string;
+  columns: string[];
+  position: number;
+  default_blurred: boolean;
+}
+
 function TemplateForm({
   initial,
   onSave,
   onCancel,
 }: {
   initial?: Template;
-  onSave: (data: { id: string; name: string; description: string; columns: string[]; position: number }) => Promise<void>;
+  onSave: (data: TemplateFormData) => Promise<void>;
   onCancel: () => void;
 }) {
   const [id, setId] = useState(initial?.id ?? "");
@@ -161,6 +171,7 @@ function TemplateForm({
   const [description, setDescription] = useState(initial?.description ?? "");
   const [columns, setColumns] = useState<string[]>(initial?.columns ?? [""]);
   const [position, setPosition] = useState(0);
+  const [defaultBlurred, setDefaultBlurred] = useState(initial?.default_blurred ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -174,7 +185,14 @@ function TemplateForm({
     if (trimmedCols.length === 0) return setError("At least one column is required");
     setSaving(true);
     try {
-      await onSave({ id: id.trim(), name: name.trim(), description: description.trim(), columns: trimmedCols, position });
+      await onSave({
+        id: id.trim(),
+        name: name.trim(),
+        description: description.trim(),
+        columns: trimmedCols,
+        position,
+        default_blurred: defaultBlurred,
+      });
       onCancel();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
@@ -267,6 +285,22 @@ function TemplateForm({
         />
       </div>
 
+      <div>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={defaultBlurred}
+            onChange={(e) => setDefaultBlurred(e.target.checked)}
+            className="accent-[var(--color-accent)]"
+          />
+          <span className="text-sm">Start with cards hidden</span>
+        </label>
+        <p className="text-xs text-muted mt-1">
+          A retro hides the cards while the team writes. A meeting that works a list together
+          starts open. The facilitator can change it on the board either way.
+        </p>
+      </div>
+
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="flex gap-2">
@@ -302,18 +336,19 @@ function TemplatesPanel({
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
 
-  async function handleCreate(data: { id: string; name: string; description: string; columns: string[]; position: number }) {
+  async function handleCreate(data: TemplateFormData) {
     await createAdminTemplate(getToken(), data);
     setCreating(false);
     onReload();
   }
 
-  async function handleUpdate(data: { id: string; name: string; description: string; columns: string[]; position: number }) {
+  async function handleUpdate(data: TemplateFormData) {
     await updateAdminTemplate(getToken(), data.id, {
       name: data.name,
       description: data.description,
       columns: data.columns,
       position: data.position,
+      default_blurred: data.default_blurred,
     });
     setEditing(null);
     onReload();
@@ -355,6 +390,7 @@ function TemplatesPanel({
                   <th className="px-4 py-2 font-medium">Name</th>
                   <th className="px-4 py-2 font-medium">Description</th>
                   <th className="px-4 py-2 font-medium">Columns</th>
+                  <th className="px-4 py-2 font-medium">Opens</th>
                   <th className="px-4 py-2 font-medium">Pos</th>
                   <th className="px-4 py-2 font-medium"></th>
                 </tr>
@@ -373,6 +409,9 @@ function TemplatesPanel({
                           </span>
                         ))}
                       </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-muted whitespace-nowrap">
+                      {t.default_blurred ? "hidden" : "cards shown"}
                     </td>
                     <td className="px-4 py-2.5 text-muted">{templates.indexOf(t)}</td>
                     <td className="px-4 py-2.5">

@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { fetchActionSources, fetchBoard, fetchLabels, importActions } from "../../lib/api";
+import {
+  fetchActionSources,
+  fetchBoard,
+  fetchLabels,
+  importActions,
+  unlockBoard,
+} from "../../lib/api";
 import { formatRelativeDate } from "../../utils/date";
 import type { ActionSourceBoard, ImportResult } from "../../lib/types";
 
@@ -23,6 +29,12 @@ export function CarryActionsPanel({ boardId }: CarryActionsPanelProps) {
   const [preview, setPreview] = useState<string[] | null>(null);
   const [copying, setCopying] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+
+  // A locked source asks for its own password, unless this tab can open it already.
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [password, setPassword] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState("");
 
   useEffect(() => {
     fetchLabels()
@@ -60,21 +72,55 @@ export function CarryActionsPanel({ boardId }: CarryActionsPanelProps) {
     );
   }
 
+  /**
+   * Reads the actions of a source board.
+   *
+   * A locked board answers nothing until this tab holds its key, so the gate goes up here and
+   * the panel asks for the password of that board. A caller who runs the source board, or who
+   * opened it earlier in this session, is never asked.
+   */
+  async function loadPreview(board: ActionSourceBoard) {
+    setPreview(null);
+    try {
+      const full = await fetchBoard(board.id);
+      const actions = full.columns.find((c) => c.role === "actions");
+      setPreview((actions?.tickets ?? []).map((t) => t.content));
+      setNeedsPassword(false);
+    } catch {
+      if (board.is_locked) {
+        setNeedsPassword(true);
+      } else {
+        setPreview([]);
+      }
+    }
+  }
+
   async function select(board: ActionSourceBoard) {
     setResult(null);
+    setNeedsPassword(false);
+    setPassword("");
+    setUnlockError("");
     if (selected?.id === board.id) {
       setSelected(null);
       setPreview(null);
       return;
     }
     setSelected(board);
-    setPreview(null);
+    await loadPreview(board);
+  }
+
+  async function unlockSource() {
+    if (!selected || !password.trim()) return;
+    setUnlocking(true);
+    setUnlockError("");
     try {
-      const full = await fetchBoard(board.id);
-      const actions = full.columns.find((c) => c.role === "actions");
-      setPreview((actions?.tickets ?? []).map((t) => t.content));
-    } catch {
-      setPreview([]);
+      await unlockBoard(selected.id, password);
+      setPassword("");
+      await loadPreview(selected);
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : "The password is wrong.");
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -149,7 +195,25 @@ export function CarryActionsPanel({ boardId }: CarryActionsPanelProps) {
                 }`}
               >
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-sm font-medium truncate">{board.title}</span>
+                  <span className="flex items-baseline gap-1.5 min-w-0">
+                    <span className="text-sm font-medium truncate">{board.title}</span>
+                    {board.is_locked && (
+                      <svg
+                        className="w-3 h-3 shrink-0 self-center text-muted"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        role="img"
+                        aria-label="Asks for a password"
+                      >
+                        <rect x="4" y="11" width="16" height="10" rx="2" />
+                        <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                      </svg>
+                    )}
+                  </span>
                   <span className="text-[11px] text-muted whitespace-nowrap shrink-0">
                     {formatRelativeDate(board.created_at)}
                   </span>
@@ -171,6 +235,42 @@ export function CarryActionsPanel({ boardId }: CarryActionsPanelProps) {
 
               {selected?.id === board.id && (
                 <div className="mt-2 rounded-lg border border-border bg-surface p-3 animate-card-enter">
+                  {needsPassword ? (
+                    <>
+                      <p className="text-xs text-muted">
+                        This board asks for its own password before its actions can come across.
+                      </p>
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value);
+                          if (unlockError) setUnlockError("");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") unlockSource();
+                        }}
+                        placeholder={`Password for ${board.title}`}
+                        autoComplete="off"
+                        className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={unlockSource}
+                        disabled={unlocking || !password.trim()}
+                        className="mt-2 w-full bg-accent text-white text-sm font-medium py-2 rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-40"
+                      >
+                        {unlocking ? "Unlocking…" : "Unlock board"}
+                      </button>
+                      {unlockError && (
+                        <p role="alert" className="text-xs text-red-600 mt-2">
+                          {unlockError}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <>
                   {preview === null && <p className="text-xs text-muted">Loading actions…</p>}
                   {preview !== null && (
                     <ul className="space-y-1.5">
@@ -206,6 +306,8 @@ export function CarryActionsPanel({ boardId }: CarryActionsPanelProps) {
                       {result.imported === 1 ? "action" : "actions"}.
                       {result.skipped > 0 && ` Skipped ${result.skipped} already here.`}
                     </p>
+                  )}
+                    </>
                   )}
                 </div>
               )}

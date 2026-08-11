@@ -5,6 +5,7 @@ import { VoteLimitControl } from "./VoteLimitControl";
 import { TimerControl } from "./TimerControl";
 import { BoardLabelsControl } from "./BoardLabelsControl";
 import { CarryActionsPanel } from "./CarryActionsPanel";
+import { BoardPasswordControl } from "./BoardPasswordControl";
 import type { ClientMessage } from "../../lib/types";
 
 interface FacilitatorMenuProps {
@@ -164,6 +165,14 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
 
                   {/* Actions of an earlier retro */}
                   <CarryActionsPanel boardId={boardId} />
+
+                  {/* The lock on the board belongs to whoever called the meeting */}
+                  {isFacilitator && (
+                    <>
+                      <hr className="border-border" />
+                      <BoardPasswordControl boardId={boardId} />
+                    </>
+                  )}
                 </>
               )}
 

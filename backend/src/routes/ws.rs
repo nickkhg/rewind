@@ -61,6 +61,7 @@ async fn handle_socket(
                         participant_name,
                         facilitator_token,
                         participant_id,
+                        access_token,
                     }) => {
                         let participant_id = participant_id
                             .filter(|id| !id.is_empty())
@@ -116,6 +117,36 @@ async fn handle_socket(
                         };
 
                         let is_facilitator = token_match || cookie_match;
+
+                        // The gate of a locked board. A reader gets in with the key that the
+                        // password gave them; the facilitator needs no key. The check sits before
+                        // the participant is counted, so a reader who is turned away leaves
+                        // nothing of themselves on the board.
+                        if !is_facilitator {
+                            let locked = match db::get_board_access(&state.db, &board_id).await {
+                                Ok(Some(access)) => {
+                                    access.password_hash.is_some()
+                                        && access_token.as_deref()
+                                            != Some(access.access_token.as_str())
+                                }
+                                Ok(None) => false,
+                                // A board whose gate cannot be read stays shut.
+                                Err(e) => {
+                                    warn!("DB error reading the board gate: {e}");
+                                    true
+                                }
+                            };
+                            if locked {
+                                let _ = sender
+                                    .send(Message::Text(
+                                        serde_json::to_string(&ServerMessage::PasswordRequired)
+                                            .unwrap()
+                                            .into(),
+                                    ))
+                                    .await;
+                                return;
+                            }
+                        }
 
                         // For anonymous boards, discard the participant name
                         let board_anonymous = db::get_board_anonymous(&state.db, &board_id)

@@ -3,8 +3,14 @@ import { useNavigate, Link } from "react-router-dom";
 import { Logo } from "../components/layout/Logo";
 import { LabelInput } from "../components/LabelInput";
 import { createBoard, fetchLabels, fetchMyBoards, fetchTemplates } from "../lib/api";
+import { setAccessToken } from "../lib/boardAccess";
 import type { MyBoardSummary, Template } from "../lib/types";
-import { COLUMN_COLORS, COLUMN_ROLE_COLORS, COLUMN_ROLE_NAMES } from "../lib/types";
+import {
+  COLUMN_COLORS,
+  COLUMN_ROLE_COLORS,
+  COLUMN_ROLE_NAMES,
+  MIN_BOARD_PASSWORD_LENGTH,
+} from "../lib/types";
 import { formatRelativeDate } from "../utils/date";
 import { isTauri, getServerUrl } from "../lib/serverUrl";
 
@@ -31,6 +37,8 @@ export default function Home() {
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>("classic");
   const [name, setName] = useState("");
   const [isAnonymous, setIsAnonymous] = useState(true);
+  const [wantsPassword, setWantsPassword] = useState(false);
+  const [password, setPassword] = useState("");
   const [labels, setLabels] = useState<string[]>([]);
   const [labelSuggestions, setLabelSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,10 +92,16 @@ export default function Home() {
     const trimmedTitle = title.trim();
     const trimmedName = name.trim();
     const trimmedCols = columns.map((c) => c.trim()).filter(Boolean);
+    const trimmedPassword = wantsPassword ? password.trim() : "";
 
     if (!trimmedTitle) return setError("Board title is required");
     if (!isAnonymous && !trimmedName) return setError("Your name is required");
     if (trimmedCols.length === 0) return setError("At least one column is required");
+    if (wantsPassword && trimmedPassword.length < MIN_BOARD_PASSWORD_LENGTH) {
+      return setError(
+        `The password needs at least ${MIN_BOARD_PASSWORD_LENGTH} characters`,
+      );
+    }
 
     setLoading(true);
     try {
@@ -98,8 +112,11 @@ export default function Home() {
         labels: labels.length > 0 ? labels : undefined,
         // The board remembers the template it started from. A custom board remembers none.
         template_id: selectedTemplate ?? undefined,
+        password: trimmedPassword || undefined,
       });
       sessionStorage.setItem(`facilitator_token_${res.board.id}`, res.facilitator_token);
+      // The person who set the password never types it: they hold the key from the start.
+      setAccessToken(res.board.id, res.access_token);
       if (isAnonymous) {
         sessionStorage.setItem(`participant_name_${res.board.id}`, "__anonymous__");
       } else {
@@ -308,6 +325,53 @@ export default function Home() {
               <span className="text-xs text-muted ml-1.5">— no names shown</span>
             </div>
           </label>
+
+          <div>
+            <label className="flex items-center gap-3 cursor-pointer group">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={wantsPassword}
+                onClick={() => {
+                  setWantsPassword((v) => !v);
+                  setPassword("");
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas ${
+                  wantsPassword ? "bg-accent" : "bg-border"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
+                    wantsPassword ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+              <div className="select-none">
+                <span className="text-sm font-medium">Ask for a password</span>
+                <span className="text-xs text-muted ml-1.5">— the link alone will not open it</span>
+              </div>
+            </label>
+
+            {wantsPassword && (
+              <div className="mt-3 animate-card-enter">
+                <label htmlFor="board-password" className="block text-sm font-medium mb-1.5">
+                  Board password
+                </label>
+                <input
+                  id="board-password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="new-password"
+                  className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
+                />
+                <p className="text-xs text-muted mt-1.5">
+                  Share it with the team apart from the link. You can change it later from Board
+                  Settings.
+                </p>
+              </div>
+            )}
+          </div>
 
           {error && (
             <p className="text-sm text-red-600">{error}</p>

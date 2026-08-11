@@ -33,20 +33,26 @@ pub async fn create_board(
     is_anonymous: bool,
     labels: &[String],
     template_id: Option<&str>,
+    password_hash: Option<&str>,
+    access_token: &str,
+    // How the board starts, which the template of the board decides.
+    is_blurred: bool,
 ) -> Result<Board, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "INSERT INTO boards (id, title, facilitator_token, facilitator_id, is_blurred, is_anonymous, created_at, template_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        "INSERT INTO boards (id, title, facilitator_token, facilitator_id, is_blurred, is_anonymous, created_at, template_id, password_hash, access_token) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(id)
     .bind(title)
     .bind(facilitator_token)
     .bind(facilitator_id)
-    .bind(true)
+    .bind(is_blurred)
     .bind(is_anonymous)
     .bind(created_at)
     .bind(template_id)
+    .bind(password_hash)
+    .bind(access_token)
     .execute(&mut *tx)
     .await?;
 
@@ -85,7 +91,7 @@ pub async fn create_board(
         id: id.to_string(),
         title: title.to_string(),
         columns: cols,
-        is_blurred: true,
+        is_blurred,
         is_anonymous,
         hide_votes: false,
         created_at,
@@ -98,12 +104,13 @@ pub async fn create_board(
         template_id: template_id.map(|t| t.to_string()),
         scorecard: Vec::new(),
         meeting_ratings: Vec::new(),
+        has_password: password_hash.is_some(),
     })
 }
 
 pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, sqlx::Error> {
     let row = sqlx::query_as::<_, BoardRow>(
-        "SELECT id, title, is_blurred, is_anonymous, hide_votes, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end, template_id FROM boards WHERE id = $1",
+        "SELECT id, title, is_blurred, is_anonymous, hide_votes, facilitator_token, facilitator_id, created_at, vote_limit_per_column, timer_end, template_id, password_hash IS NOT NULL AS has_password FROM boards WHERE id = $1",
     )
     .bind(board_id)
     .fetch_optional(pool)
@@ -251,6 +258,7 @@ pub async fn get_board(pool: &PgPool, board_id: &str) -> Result<Option<Board>, s
         template_id: board_row.template_id,
         scorecard,
         meeting_ratings,
+        has_password: board_row.has_password,
     }))
 }
 
@@ -279,6 +287,42 @@ pub async fn get_board_anonymous(
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| r.is_anonymous))
+}
+
+/// Reads what the gate of a board needs, in one query: the name to show, whether a name is asked
+/// for after the password, the hash to check the password against, and the key to hand back.
+pub async fn get_board_access(
+    pool: &PgPool,
+    board_id: &str,
+) -> Result<Option<BoardAccess>, sqlx::Error> {
+    sqlx::query_as::<_, BoardAccess>(
+        "SELECT title, is_anonymous, password_hash, access_token FROM boards WHERE id = $1",
+    )
+    .bind(board_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// Puts a password on a board, or takes it off, and writes a new key in place of the old one.
+///
+/// The key changes on every write, which is what makes a change of password a way to shut the
+/// board: a reader who holds the old key has to ask again. Gives false when there is no such board.
+pub async fn set_board_password(
+    pool: &PgPool,
+    board_id: &str,
+    password_hash: Option<&str>,
+    access_token: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE boards SET password_hash = $1, access_token = $2 WHERE id = $3",
+    )
+    .bind(password_hash)
+    .bind(access_token)
+    .bind(board_id)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn get_board_facilitator_id(
@@ -335,32 +379,38 @@ pub async fn get_boards_by_facilitator_id(
 
 pub async fn list_templates(pool: &PgPool) -> Result<Vec<crate::models::Template>, sqlx::Error> {
     let rows = sqlx::query_as::<_, TemplateRow>(
-        "SELECT id, name, description, columns FROM templates ORDER BY position",
+        "SELECT id, name, description, columns, default_blurred FROM templates ORDER BY position",
     )
     .fetch_all(pool)
     .await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|r| crate::models::Template {
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            columns: r.columns,
-        })
-        .collect())
+    Ok(rows.into_iter().map(template_from_row).collect())
 }
 
-/// Tells whether a template of this id is on file. A board keeps the id it was made from,
-/// so the id is checked once here and then never again.
-pub async fn template_exists(pool: &PgPool, template_id: &str) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query_as::<_, CountRow>(
-        "SELECT COUNT(*) as count FROM templates WHERE id = $1",
+/// Reads one template. A board keeps the id it was made from, so this is asked once, when the
+/// board is made: to check the id names a real template, and to read the settings it starts with.
+pub async fn get_template(
+    pool: &PgPool,
+    template_id: &str,
+) -> Result<Option<crate::models::Template>, sqlx::Error> {
+    let row = sqlx::query_as::<_, TemplateRow>(
+        "SELECT id, name, description, columns, default_blurred FROM templates WHERE id = $1",
     )
     .bind(template_id)
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await?;
-    Ok(row.count > 0)
+
+    Ok(row.map(template_from_row))
+}
+
+fn template_from_row(r: TemplateRow) -> crate::models::Template {
+    crate::models::Template {
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        columns: r.columns,
+        default_blurred: r.default_blurred,
+    }
 }
 
 pub async fn create_template(
@@ -370,15 +420,17 @@ pub async fn create_template(
     description: &str,
     columns: &[String],
     position: i32,
+    default_blurred: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "INSERT INTO templates (id, name, description, columns, position) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO templates (id, name, description, columns, position, default_blurred) VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(id)
     .bind(name)
     .bind(description)
     .bind(columns)
     .bind(position)
+    .bind(default_blurred)
     .execute(pool)
     .await?;
     Ok(())
@@ -391,14 +443,16 @@ pub async fn update_template(
     description: &str,
     columns: &[String],
     position: i32,
+    default_blurred: bool,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
-        "UPDATE templates SET name = $1, description = $2, columns = $3, position = $4 WHERE id = $5",
+        "UPDATE templates SET name = $1, description = $2, columns = $3, position = $4, default_blurred = $5 WHERE id = $6",
     )
     .bind(name)
     .bind(description)
     .bind(columns)
     .bind(position)
+    .bind(default_blurred)
     .bind(id)
     .execute(pool)
     .await?;
@@ -1355,7 +1409,9 @@ pub async fn list_action_sources(
             b.created_at,
             (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id
               WHERE c.board_id = b.id AND c.role = 'actions') AS action_count,
-            COALESCE((SELECT array_agg(l.label ORDER BY l.label) FROM board_labels l WHERE l.board_id = b.id), '{}'::text[]) AS labels
+            COALESCE((SELECT array_agg(l.label ORDER BY l.label) FROM board_labels l WHERE l.board_id = b.id), '{}'::text[]) AS labels,
+            -- A locked board is named here but not opened here. The copy asks for its password.
+            b.password_hash IS NOT NULL AS is_locked
         FROM boards b
         WHERE b.id <> $1
           AND ($2 = '' OR b.title ILIKE '%' || $2 || '%')
@@ -1382,6 +1438,7 @@ pub async fn list_action_sources(
             created_at: r.created_at,
             action_count: r.action_count,
             labels: r.labels,
+            is_locked: r.is_locked,
         })
         .collect())
 }
@@ -1804,6 +1861,17 @@ struct BoardRow {
     vote_limit_per_column: Option<i32>,
     timer_end: Option<DateTime<Utc>>,
     template_id: Option<String>,
+    has_password: bool,
+}
+
+/// What the gate of a board reads. The hash stays inside this layer and the route above it;
+/// it never reaches a view.
+#[derive(sqlx::FromRow)]
+pub struct BoardAccess {
+    pub title: String,
+    pub is_anonymous: bool,
+    pub password_hash: Option<String>,
+    pub access_token: String,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1981,6 +2049,7 @@ struct ActionSourceRow {
     created_at: DateTime<Utc>,
     action_count: i64,
     labels: Vec<String>,
+    is_locked: bool,
 }
 
 #[derive(sqlx::FromRow)]
@@ -2015,6 +2084,7 @@ struct TemplateRow {
     name: String,
     description: String,
     columns: Vec<String>,
+    default_blurred: bool,
 }
 
 #[derive(sqlx::FromRow)]

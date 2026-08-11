@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useBoardStore } from "../store/boardStore";
 import type { ClientMessage, ServerMessage } from "../lib/types";
 import { getServerUrl } from "../lib/serverUrl";
+import { clearAccessToken } from "../lib/boardAccess";
 
 function getWsUrl(boardId: string): string {
   const base = getServerUrl();
@@ -14,9 +15,19 @@ function getWsUrl(boardId: string): string {
   return `${protocol}//${location.host}/ws/boards/${boardId}`;
 }
 
-export function useWebSocket(boardId: string, participantName: string) {
+/**
+ * Holds the socket of one board open.
+ *
+ * `accessToken` is the key to a locked board. It is sent with the Join, and a change of it
+ * reconnects, which is how a reader who has just passed the gate gets onto the board.
+ */
+export function useWebSocket(
+  boardId: string,
+  participantName: string,
+  accessToken?: string | null,
+) {
   const wsRef = useRef<WebSocket | null>(null);
-  const { setBoard, setAuth, setConnected } = useBoardStore();
+  const { setBoard, setAuth, setConnected, setPasswordRequired } = useBoardStore();
 
   const send = useCallback((msg: ClientMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -46,6 +57,7 @@ export function useWebSocket(boardId: string, participantName: string) {
             participant_name: participantName,
             ...(storedId ? { participant_id: storedId } : {}),
             ...(facToken ? { facilitator_token: facToken } : {}),
+            ...(accessToken ? { access_token: accessToken } : {}),
           },
         };
         ws.send(JSON.stringify(joinMsg));
@@ -60,6 +72,13 @@ export function useWebSocket(boardId: string, participantName: string) {
           case "Authenticated":
             sessionStorage.setItem(`participant_id_${boardId}`, msg.payload.participant_id);
             setAuth(msg.payload.participant_id, msg.payload.is_facilitator);
+            setPasswordRequired(false);
+            break;
+          case "PasswordRequired":
+            // The key we hold, if any, opens nothing. Drop it and let the gate ask again.
+            clearAccessToken(boardId);
+            setPasswordRequired(true);
+            alive = false;
             break;
           case "Error":
             console.error("Server error:", msg.payload.message);
@@ -87,7 +106,15 @@ export function useWebSocket(boardId: string, participantName: string) {
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [boardId, participantName, setBoard, setAuth, setConnected]);
+  }, [
+    boardId,
+    participantName,
+    accessToken,
+    setBoard,
+    setAuth,
+    setConnected,
+    setPasswordRequired,
+  ]);
 
   return { send };
 }

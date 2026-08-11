@@ -8,6 +8,10 @@ pub enum ClientMessage {
         participant_name: String,
         facilitator_token: Option<String>,
         participant_id: Option<String>,
+        /// The key a reader got for the password of a locked board. A board with no password
+        /// takes no notice of it.
+        #[serde(default)]
+        access_token: Option<String>,
     },
     AddTicket {
         column_id: String,
@@ -115,5 +119,8 @@ pub enum ClientMessage {
 pub enum ServerMessage {
     BoardState { board: BoardView },
     Authenticated { is_facilitator: bool, participant_id: String },
+    /// The board asks for a password that this reader did not bring. The socket closes after it,
+    /// and the client puts the gate back up in place of the board.
+    PasswordRequired,
     Error { message: String },
 }

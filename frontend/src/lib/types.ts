@@ -28,6 +28,8 @@ export interface Board {
   scorecard: ScorecardMetric[];
   /** One mark per participant who rated the meeting. The average is worked out here. */
   meeting_ratings: MeetingRating[];
+  /** Whether the board asks a newcomer for a password. Never the password itself. */
+  has_password: boolean;
 }
 
 /**
@@ -136,6 +138,31 @@ export interface CreateBoardRequest {
   labels?: string[];
   /** The template the board starts from. Absent for a custom board. */
   template_id?: string;
+  /** The word the board will ask for. Absent leaves the board open to anyone with the link. */
+  password?: string;
+}
+
+/** The shortest password a board takes. The backend applies the same floor. */
+export const MIN_BOARD_PASSWORD_LENGTH = 4;
+
+/** What a person learns about a board before the gate opens. Nothing that is on the board. */
+export interface BoardAccess {
+  id: string;
+  title: string;
+  /** True when the board asks for a password that this tab has not yet given. */
+  is_locked: boolean;
+  is_anonymous: boolean;
+}
+
+/** The answer to the right password. */
+export interface UnlockResponse {
+  access_token: string;
+}
+
+/** The answer to a change of password. The key is new, so the facilitator keeps reading. */
+export interface PasswordResponse {
+  has_password: boolean;
+  access_token: string;
 }
 
 /** A board that can supply actions to the board in view. */
@@ -145,6 +172,8 @@ export interface ActionSourceBoard {
   created_at: string;
   action_count: number;
   labels: string[];
+  /** True when the board asks for a password before it hands its actions over. */
+  is_locked: boolean;
 }
 
 export interface LabelCount {
@@ -160,11 +189,22 @@ export interface ImportResult {
 export interface CreateBoardResponse {
   board: Board;
   facilitator_token: string;
+  /** The key to the board. The facilitator holds it from the start and never types the password. */
+  access_token: string;
 }
 
 // WebSocket protocol
 export type ClientMessage =
-  | { type: "Join"; payload: { participant_name: string; facilitator_token?: string; participant_id?: string } }
+  | {
+      type: "Join";
+      payload: {
+        participant_name: string;
+        facilitator_token?: string;
+        participant_id?: string;
+        /** The key to a locked board. A board with no password takes no notice of it. */
+        access_token?: string;
+      };
+    }
   | { type: "AddTicket"; payload: { column_id: string; content: string; gif?: Gif | null } }
   | { type: "RemoveTicket"; payload: { ticket_id: string } }
   | { type: "EditTicket"; payload: { ticket_id: string; content: string; gif?: Gif | null } }
@@ -204,6 +244,8 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "BoardState"; payload: { board: Board } }
   | { type: "Authenticated"; payload: { is_facilitator: boolean; participant_id: string } }
+  /** The board asks for a password this reader did not bring. The socket closes after it. */
+  | { type: "PasswordRequired" }
   | { type: "Error"; payload: { message: string } };
 
 export interface MyBoardSummary {
@@ -221,6 +263,12 @@ export interface Template {
   name: string;
   description: string;
   columns: string[];
+  /**
+   * Whether a board from this template starts with its cards hidden. True for a retro, where the
+   * team writes before it reads; false for a meeting that works a list together. It sets the
+   * first state of the board only — the facilitator still decides from there.
+   */
+  default_blurred: boolean;
 }
 
 export type SortMode = "newest" | "most-votes";

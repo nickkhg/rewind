@@ -9,10 +9,13 @@ interface BoardState {
   sortMode: SortMode;
   pendingUndo: boolean;
   facilitatorPeek: boolean;
+  /** True after the server turned this reader away at the gate of a locked board. */
+  passwordRequired: boolean;
 
   setBoard: (board: Board) => void;
   setAuth: (participantId: string, isFacilitator: boolean) => void;
   setConnected: (connected: boolean) => void;
+  setPasswordRequired: (required: boolean) => void;
   setSortMode: (mode: SortMode) => void;
   setPendingUndo: () => void;
   clearPendingUndo: () => void;
@@ -28,6 +31,7 @@ export const useBoardStore = create<BoardState>((set) => ({
   sortMode: "newest",
   pendingUndo: false,
   facilitatorPeek: false,
+  passwordRequired: false,
 
   setBoard: (board) => set((state) => ({
     board,
@@ -36,6 +40,9 @@ export const useBoardStore = create<BoardState>((set) => ({
   })),
   setAuth: (participantId, isFacilitator) => set({ participantId, isFacilitator }),
   setConnected: (connected) => set({ isConnected: connected }),
+  // The board goes with it: what the gate shuts, the reader must not keep on screen.
+  setPasswordRequired: (required) =>
+    set(required ? { passwordRequired: true, board: null } : { passwordRequired: false }),
   setSortMode: (mode) => set({ sortMode: mode }),
   setPendingUndo: () => set({ pendingUndo: true }),
   clearPendingUndo: () => set({ pendingUndo: false }),
@@ -49,5 +56,6 @@ export const useBoardStore = create<BoardState>((set) => ({
       sortMode: "newest",
       pendingUndo: false,
       facilitatorPeek: false,
+      passwordRequired: false,
     }),
 }));

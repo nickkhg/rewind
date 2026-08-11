@@ -1,6 +1,7 @@
 mod db;
 mod error;
 mod models;
+mod password;
 mod protocol;
 mod routes;
 mod state;
@@ -14,7 +15,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use http::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE};
-use http::Method;
+use http::{HeaderName, Method};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -65,6 +66,15 @@ async fn main() {
         .route("/api/boards", post(routes::boards::create_board))
         .route("/api/boards/{id}", get(routes::boards::get_board))
         .route(
+            "/api/boards/{id}/access",
+            get(routes::boards::board_access),
+        )
+        .route("/api/boards/{id}/unlock", post(routes::boards::unlock_board))
+        .route(
+            "/api/boards/{id}/password",
+            put(routes::boards::set_password),
+        )
+        .route(
             "/api/boards/{id}/action-sources",
             get(routes::boards::list_action_sources),
         )
@@ -110,7 +120,13 @@ async fn main() {
     let app = app
         .layer(
             CorsLayer::new()
-                .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE])
+                // The last one carries the key to a locked board, which a GET has no body for.
+                .allow_headers([
+                    AUTHORIZATION,
+                    ACCEPT,
+                    CONTENT_TYPE,
+                    HeaderName::from_static(routes::boards::ACCESS_TOKEN_HEADER),
+                ])
                 .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
                 .allow_origin(AllowOrigin::mirror_request())
                 .allow_credentials(true),

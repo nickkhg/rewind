@@ -17,12 +17,13 @@ import { TicketCard } from "../components/board/Ticket";
 import { MergeUndoToast } from "../components/board/MergeUndoToast";
 import { ScorecardPanel } from "../components/board/ScorecardPanel";
 import { WheelOfMisfortuneButton } from "../components/board/WheelOfMisfortune";
+import { BoardUnlockGate } from "../components/board/BoardUnlockGate";
 import { columnColors } from "../utils/columnColors";
 import { isLevel10 } from "../lib/types";
-import type { Ticket } from "../lib/types";
+import type { BoardAccess, Ticket } from "../lib/types";
+import { fetchBoardAccess, unlockBoard } from "../lib/api";
+import { getAccessToken } from "../lib/boardAccess";
 import { AppShell } from "../components/layout/AppShell";
-
-const BASE = import.meta.env.VITE_API_URL ?? "";
 
 export default function Board() {
   const { id } = useParams<{ id: string }>();
@@ -31,35 +32,59 @@ export default function Board() {
   const isFacilitator = useBoardStore((s) => s.isFacilitator);
   const reset = useBoardStore((s) => s.reset);
   const setPendingUndo = useBoardStore((s) => s.setPendingUndo);
+  const passwordRequired = useBoardStore((s) => s.passwordRequired);
+  const setPasswordRequired = useBoardStore((s) => s.setPasswordRequired);
 
   // Check for participant name — prompt if missing (joined via shared link)
   const [participantName, setParticipantName] = useState(() => {
     return sessionStorage.getItem(`participant_name_${id}`) ?? "";
   });
   const [nameInput, setNameInput] = useState("");
-  const [checkingAnonymous, setCheckingAnonymous] = useState(!participantName);
 
-  // For shared-link joins, check if board is anonymous before showing name prompt
+  // What this reader may know about the board before the gate opens: the name of it, whether it
+  // is locked for them, and whether it will ask for their name.
+  const [access, setAccess] = useState<BoardAccess | null>(null);
+  const [accessToken, setAccessToken] = useState(() => (id ? getAccessToken(id) : null));
+  const [accessError, setAccessError] = useState("");
+
   useEffect(() => {
-    if (participantName || !id) return;
+    if (!id) return;
     let cancelled = false;
-    fetch(`${BASE}/api/boards/${id}`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
+    fetchBoardAccess(id)
       .then((data) => {
         if (cancelled) return;
-        if (data?.is_anonymous) {
+        setAccess(data);
+        // An anonymous board asks for no name, so the prompt is skipped for a shared link too.
+        if (data.is_anonymous && !data.is_locked) {
           sessionStorage.setItem(`participant_name_${id}`, "__anonymous__");
           setParticipantName("__anonymous__");
         }
-        setCheckingAnonymous(false);
       })
-      .catch(() => {
-        if (!cancelled) setCheckingAnonymous(false);
+      .catch((err) => {
+        if (!cancelled) {
+          setAccessError(err instanceof Error ? err.message : "The board did not load.");
+        }
       });
-    return () => { cancelled = true; };
-  }, [id, participantName]);
+    return () => {
+      cancelled = true;
+    };
+  }, [id, accessToken]);
 
-  const { send } = useWebSocket(id ?? "", participantName);
+  // The board stays shut until the key is in hand: the gate first, the name after it.
+  const locked = (access?.is_locked ?? false) || passwordRequired;
+
+  const { send } = useWebSocket(id ?? "", locked ? "" : participantName, accessToken);
+
+  const handleUnlock = useCallback(
+    async (password: string) => {
+      if (!id) return;
+      const token = await unlockBoard(id, password);
+      // Both have to give way, or the gate would stand in front of a board we now hold the key to.
+      setPasswordRequired(false);
+      setAccessToken(token);
+    },
+    [id, setPasswordRequired],
+  );
 
   useEffect(() => {
     return () => {
@@ -119,13 +144,35 @@ export default function Board() {
     return null;
   }
 
-  // While checking if board is anonymous, show loading
-  if (checkingAnonymous) {
+  if (accessError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-surface rounded-2xl shadow-sm border border-border p-8 text-center">
+          <h2 className="font-display text-xl font-semibold">This board did not open</h2>
+          <p className="text-sm text-muted mt-2">{accessError}</p>
+          <button
+            onClick={() => navigate("/")}
+            className="mt-5 w-full bg-accent text-white font-medium py-2.5 rounded-lg hover:bg-accent-hover transition-colors"
+          >
+            Back to the start
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Until the board says whether it is locked, there is nothing to draw.
+  if (!access) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-muted">Loading...</p>
       </div>
     );
+  }
+
+  // The gate stands before everything else, the name prompt included.
+  if (locked) {
+    return <BoardUnlockGate title={access.title} onUnlock={handleUnlock} />;
   }
 
   // Name entry for participants who joined via shared link (non-anonymous boards)
