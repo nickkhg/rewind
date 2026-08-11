@@ -1,5 +1,3 @@
-use argon2::password_hash::PasswordHash;
-use argon2::{Argon2, PasswordVerifier};
 use axum::extract::{Path, State};
 use axum::http::request::Parts;
 use axum::Json;
@@ -8,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db;
 use crate::error::AppError;
+use crate::password;
 use crate::state::AppState;
 
 // --- Auth extractor ---
@@ -39,12 +38,9 @@ impl axum::extract::FromRequestParts<AppState> for AdminAuth {
                 .strip_prefix("Bearer ")
                 .ok_or_else(|| AppError::Unauthorized("Invalid Authorization format".to_string()))?;
 
-            let parsed_hash = PasswordHash::new(hash)
-                .map_err(|_| AppError::Internal("Invalid stored hash".to_string()))?;
-
-            Argon2::default()
-                .verify_password(token.as_bytes(), &parsed_hash)
-                .map_err(|_| AppError::Unauthorized("Invalid admin token".to_string()))?;
+            if !password::verify(token.to_string(), hash.clone()).await? {
+                return Err(AppError::Unauthorized("Invalid admin token".to_string()));
+            }
 
             Ok(AdminAuth)
         }
@@ -188,6 +184,15 @@ pub struct CreateTemplateRequest {
     pub columns: Vec<String>,
     #[serde(default)]
     pub position: i32,
+    /// How a board from this template opens. Absent means blurred, as a retro is.
+    #[serde(default = "default_blurred")]
+    pub default_blurred: bool,
+}
+
+/// A board hides its cards until the team has written them. Only a template that says otherwise
+/// makes an open board.
+fn default_blurred() -> bool {
+    true
 }
 
 pub async fn create_template(
@@ -210,6 +215,7 @@ pub async fn create_template(
         &req.description,
         &req.columns,
         req.position,
+        req.default_blurred,
     )
     .await?;
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -222,6 +228,8 @@ pub struct UpdateTemplateRequest {
     pub columns: Vec<String>,
     #[serde(default)]
     pub position: i32,
+    #[serde(default = "default_blurred")]
+    pub default_blurred: bool,
 }
 
 pub async fn update_template(
@@ -245,6 +253,7 @@ pub async fn update_template(
         &req.description,
         &req.columns,
         req.position,
+        req.default_blurred,
     )
     .await?;
     if !updated {

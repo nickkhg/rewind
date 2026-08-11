@@ -25,20 +25,22 @@ cargo check --workspace
 
 Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri/` (Tauri v2 desktop wrapper). Cargo workspace at root, pnpm workspace for frontend.
 
-**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, and the actions carry-over. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
+**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the actions carry-over, and the board password. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
 
 **Backend state:** `AppState` holds a `PgPool` for database access and a parallel map of `tokio::sync::broadcast` channels (capacity 64) for WebSocket fan-out plus in-memory participant tracking.
 
 **Frontend state:** Zustand store (`boardStore.ts`) holds board, participantId, isFacilitator, isConnected, sortMode. The `useWebSocket` hook connects on mount, sends Join with name + optional facilitator token from `sessionStorage`, and dispatches server messages to the store. Auto-reconnects on close (2s delay).
 
-**Auth model:** No accounts. Facilitator gets a `facilitator_token` on board creation, stored in `sessionStorage`. Only the facilitator can toggle blur. Authors can edit/delete their own tickets. Anyone can vote (idempotent toggle via HashSet).
+**Auth model:** No accounts. Facilitator gets a `facilitator_token` on board creation, stored in `sessionStorage`. Only the facilitator can toggle blur. Authors can edit/delete their own tickets. Anyone can vote (idempotent toggle via HashSet). A board can also ask for a password, which the server checks before it hands the board to anyone (see Password-Protected Boards).
 
 ## WebSocket Protocol
 
 Messages are serde-tagged enums: `#[serde(tag = "type", content = "payload")]`. TypeScript mirrors this as discriminated unions in `lib/types.ts`.
 
 Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`, `SetTicketDone`, `SetRockStatus`, `RateMeeting`, `AddScorecardMetric`, `UpdateScorecardMetric`, `RemoveScorecardMetric`
-Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `Error`
+Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `PasswordRequired` (the gate of a locked board; the socket closes after it), `Error`
+
+`Join` carries an optional `access_token`, the key a reader got for the password of a locked board.
 
 `AddTicket`, `EditTicket`, `AddComment` and `EditComment` each carry an optional `gif`. The client sends the whole state it wants, so an edit that leaves `gif` out takes the picture off the card.
 
@@ -55,6 +57,50 @@ The facilitator or an editor copies the actions of any other board into Previous
 - `PUT /api/boards/{id}/labels` and `GET /api/labels` manage the board labels. Labels are free text, kept lower case, six per board at most (`normalize_labels` in `models.rs`).
 
 REST carries these three, not the WebSocket protocol, because each one answers the caller with a result or an error. `db::is_board_privileged` applies the same rule as the WebSocket handler: facilitator token, facilitator cookie, or a place in the editor list.
+
+## Password-Protected Boards
+
+A board link is the only key a board has, so a board that talks about pay, or people, or an
+incident can ask for a second one. `boards.password_hash` holds an Argon2 hash of the word the
+facilitator chose — the same algorithm and the same crate as `ADMIN_TOKEN_HASH`, in one place now
+(`password.rs`), which the admin extractor also calls. NULL means the board is open, which every
+board made before the migration is. The hash work runs on `spawn_blocking`, because Argon2 spends
+tens of milliseconds of CPU on purpose and a board password is checked at every gate.
+
+- **The password buys a key, and the key does the rest.** `boards.access_token` is a nanoid that
+  `POST /api/boards/{id}/unlock` gives back for the right password. The browser keeps the key in
+  `sessionStorage` (`board_access_{id}`), and sends it on the `X-Board-Access` header for REST and
+  in the `Join` for the socket. The password itself is never stored on the client. A change of
+  password writes a new key, so the readers who hold the old one are asked again; the sockets that
+  are already joined stay joined, because a change is meant to keep the next reader out and not to
+  throw the room out.
+- **The server holds the gate, not the browser.** `GET /api/boards/{id}` answers 401 without the
+  key, and the WebSocket answers `PasswordRequired` and closes before the participant is counted.
+  A locked board hands over its title, whether it is locked, and whether it asks for a name —
+  `GET /api/boards/{id}/access`, which is what the gate draws itself from. Nothing that is on the
+  board goes with it.
+- **The facilitator needs no key.** The facilitator token and the facilitator cookie open the
+  board as they always did, and the person who set the password gets the key with the board at
+  creation. `PUT /api/boards/{id}/password` sets, changes or removes it, and takes the facilitator
+  alone: an editor may write on a board, but the lock on it belongs to whoever called the meeting.
+- **A carried action asks the source board.** A locked board is named in
+  `GET /api/boards/{id}/action-sources` with `is_locked`, and the copy asks for its password:
+  `import_actions` runs the same read check on the source that `GET /api/boards/{id}` runs. Being
+  the facilitator of the target board says nothing about the source. Nobody is asked twice —
+  a caller who runs the source board, or who opened it earlier in the session, holds the key
+  already. Two boards with the same password hold two different hashes, because every hash carries
+  its own salt, so the answer to "is it the same password" is always "can you open it".
+- **The gate stands before the name.** A person who cannot open the board is never asked who
+  they are.
+
+## Template Defaults
+
+`templates.default_blurred` says how a board from that template opens. A retro starts blurred,
+because the team writes before it reads. A Level 10 meeting works a list the whole room reads
+together, so `level10` starts with the cards shown and the facilitator has one less thing to turn
+off each week. `create_board` reads the value once, from the template row, and writes it to
+`boards.is_blurred`; nothing follows the board after that, and `ToggleBlur` works as it always did.
+A custom board, and a board whose template id names no row, starts blurred.
 
 ## Closing an Action
 
@@ -184,3 +230,8 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
   it too, since that route names no participant and would otherwise hand over the whole board.
 - **Sorting** is client-side only (not synced): "newest" or "most-votes" in `utils/sort.ts`.
 - **Tailwind v4** with `@theme` block in `global.css` for custom properties. Fonts loaded via Google Fonts `<link>` in `index.html`.
+- **The version label** on the home page reads the server, not the bundle. `frontend/package.json`
+  stays at 0.0.0, so `GET /api/config` carries `version` from `env!("CARGO_PKG_VERSION")` —
+  `backend/Cargo.toml`, which a release bumps with the other three files. `lib/config.ts` holds
+  the one config request of the session; the GIPHY key rides on it as well. A server that does
+  not answer leaves the label out rather than showing a number it does not have.

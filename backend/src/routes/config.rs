@@ -13,5 +13,7 @@ use crate::state::AppState;
 pub async fn get_config(State(state): State<AppState>) -> Json<ClientConfig> {
     Json(ClientConfig {
         giphy_api_key: state.giphy_api_key.clone(),
+        // Read at compile time from `backend/Cargo.toml`, which the release bumps.
+        version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }

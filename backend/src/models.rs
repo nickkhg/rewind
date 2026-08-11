@@ -50,6 +50,8 @@ pub struct Board {
     /// Empty on every board that is not a Level 10 board.
     pub scorecard: Vec<ScorecardMetric>,
     pub meeting_ratings: Vec<MeetingRatingView>,
+    /// Whether the board asks for a password. The hash itself never leaves the database layer.
+    pub has_password: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -224,6 +226,9 @@ pub struct BoardView {
     pub template_id: Option<String>,
     pub scorecard: Vec<ScorecardMetric>,
     pub meeting_ratings: Vec<MeetingRatingView>,
+    /// Whether the board asks a newcomer for a password. Says that a lock is there, and nothing
+    /// about the word itself.
+    pub has_password: bool,
 }
 
 /// The letters that stand in for the words of a card that the reader may not read yet.
@@ -285,6 +290,7 @@ impl Board {
             template_id: self.template_id.clone(),
             scorecard: self.scorecard.clone(),
             meeting_ratings: self.meeting_ratings.clone(),
+            has_password: self.has_password,
         }
     }
 }
@@ -355,6 +361,9 @@ pub struct ActionSourceBoard {
     pub created_at: DateTime<Utc>,
     pub action_count: i64,
     pub labels: Vec<String>,
+    /// True when the board asks for a password. The copy then asks for it as well, unless the
+    /// caller can open that board already.
+    pub is_locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -370,12 +379,17 @@ pub struct ImportResult {
     pub skipped: usize,
 }
 
+/// A format a board can start from, and the settings it starts with.
 #[derive(Debug, Clone, Serialize)]
 pub struct Template {
     pub id: String,
     pub name: String,
     pub description: String,
     pub columns: Vec<String>,
+    /// Whether a board made from this template starts with its cards hidden. True for a retro,
+    /// where the team writes before it reads. False for a meeting that works a list together.
+    /// It sets the first state of the board and nothing after it: the facilitator still decides.
+    pub default_blurred: bool,
 }
 
 // --- Teams ---
@@ -404,6 +418,64 @@ pub struct CreateBoardRequest {
     /// The template the caller picked. An old client leaves it out and gets a board with no tag.
     #[serde(default)]
     pub template_id: Option<String>,
+    /// The word the board asks for. Absent, or empty, leaves the board open to anyone who
+    /// holds the link.
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// The shortest and the longest password a board takes. The floor keeps out a password of one
+/// character, which is no lock at all; the ceiling keeps a long paste from reaching Argon2.
+pub const MIN_BOARD_PASSWORD_LENGTH: usize = 4;
+pub const MAX_BOARD_PASSWORD_LENGTH: usize = 128;
+
+/// Reads a password the way the board will keep it, or says what is wrong with it.
+///
+/// The ends are trimmed, because a password that came from a form carries whatever the paste
+/// brought with it, and a space no one can see is a lock no one can open. What is inside stays
+/// as it was typed. An empty value gives `Ok(None)`, which means the board asks for nothing.
+pub fn read_password(raw: Option<&str>) -> Result<Option<String>, String> {
+    let Some(password) = raw.map(str::trim).filter(|p| !p.is_empty()) else {
+        return Ok(None);
+    };
+
+    if password.chars().count() < MIN_BOARD_PASSWORD_LENGTH {
+        return Err(format!(
+            "The password must have at least {MIN_BOARD_PASSWORD_LENGTH} characters"
+        ));
+    }
+    if password.len() > MAX_BOARD_PASSWORD_LENGTH {
+        return Err(format!(
+            "The password must have at most {MAX_BOARD_PASSWORD_LENGTH} characters"
+        ));
+    }
+
+    Ok(Some(password.to_string()))
+}
+
+/// What a person learns about a board before they are let in: enough to draw the gate, and
+/// nothing that is on the board.
+#[derive(Debug, Clone, Serialize)]
+pub struct BoardAccessView {
+    pub id: String,
+    pub title: String,
+    /// True when the board asks for a password that this caller has not yet given.
+    pub is_locked: bool,
+    /// The gate asks for a name after the password, so the client has to know this here.
+    pub is_anonymous: bool,
+}
+
+/// The answer to the right password: the key for the rest of the meeting.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnlockResponse {
+    pub access_token: String,
+}
+
+/// The answer to a change of password. The token is new, so the facilitator keeps reading.
+#[derive(Debug, Clone, Serialize)]
+pub struct PasswordResponse {
+    pub has_password: bool,
+    pub access_token: String,
 }
 
 /// The most labels that one board can carry.
@@ -438,6 +510,9 @@ pub fn normalize_labels(raw: &[String]) -> Vec<String> {
 pub struct CreateBoardResponse {
     pub board: BoardView,
     pub facilitator_token: String,
+    /// The key to a locked board. The facilitator holds it from the start, so that the person who
+    /// set the password never has to type it, and never depends on a cookie to read their board.
+    pub access_token: String,
 }
 
 /// What the frontend must learn from the server before it draws the board.
@@ -446,6 +521,10 @@ pub struct CreateBoardResponse {
 pub struct ClientConfig {
     /// None when no key is set. The frontend then leaves out the GIF controls.
     pub giphy_api_key: Option<String>,
+    /// The version of the server, which the release sets in `backend/Cargo.toml`. The web app
+    /// has no version of its own — `frontend/package.json` stays at 0.0.0 — so the label it
+    /// shows comes from here.
+    pub version: String,
 }
 
 #[cfg(test)]
@@ -558,6 +637,7 @@ mod tests {
             template_id: None,
             scorecard: Vec::new(),
             meeting_ratings: Vec::new(),
+            has_password: false,
         }
     }
 
@@ -567,6 +647,27 @@ mod tests {
             .flat_map(|c| c.tickets.iter())
             .find(|t| t.id == ticket_id)
             .expect("ticket")
+    }
+
+    #[test]
+    fn no_password_leaves_the_board_open() {
+        assert_eq!(read_password(None), Ok(None));
+        assert_eq!(read_password(Some("")), Ok(None));
+        assert_eq!(read_password(Some("   ")), Ok(None));
+    }
+
+    #[test]
+    fn a_password_loses_the_space_at_its_ends_and_keeps_the_rest() {
+        assert_eq!(
+            read_password(Some("  let me in  ")),
+            Ok(Some("let me in".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_short_password_is_refused() {
+        assert!(read_password(Some("abc")).is_err());
+        assert!(read_password(Some(&"x".repeat(MAX_BOARD_PASSWORD_LENGTH + 1))).is_err());
     }
 
     #[test]

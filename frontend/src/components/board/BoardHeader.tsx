@@ -32,6 +32,28 @@ export function BoardHeader({ send }: BoardHeaderProps) {
         <div className="flex items-center gap-4 min-w-0">
           <Logo className="text-xl text-accent shrink-0" />
           <h1 className="font-display text-lg font-semibold truncate">{board.title}</h1>
+          {/* The room can see that the link alone does not open this board. */}
+          {board.has_password && (
+            <span
+              className="shrink-0 text-muted"
+              title="This board asks for a password"
+              aria-label="This board asks for a password"
+              role="img"
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="4" y="11" width="16" height="10" rx="2" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+            </span>
+          )}
           {board.labels.length > 0 && (
             <div className="hidden sm:flex items-center gap-1.5 shrink-0">
               {board.labels.map((label) => (

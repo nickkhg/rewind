@@ -1,19 +1,23 @@
 import type {
   ActionSourceBoard,
   Board,
+  BoardAccess,
   ClientConfig,
   CreateBoardRequest,
   CreateBoardResponse,
   ImportResult,
   LabelCount,
   MyBoardSummary,
+  PasswordResponse,
   Template,
   Team,
+  UnlockResponse,
   GlobalStats,
   AdminBoardSummary,
   AdminBoardDetail,
 } from "./types";
 import { getServerUrl } from "./serverUrl";
+import { accessHeader, getAccessToken, setAccessToken } from "./boardAccess";
 
 export async function createBoard(req: CreateBoardRequest): Promise<CreateBoardResponse> {
   const res = await fetch(`${getServerUrl()}/api/boards`, {
@@ -29,9 +33,56 @@ export async function createBoard(req: CreateBoardRequest): Promise<CreateBoardR
 export async function fetchBoard(id: string): Promise<Board> {
   const res = await fetch(`${getServerUrl()}/api/boards/${id}`, {
     credentials: "include",
+    headers: accessHeader(id),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// --- The gate of a locked board ---
+
+/** Asks what this tab may learn about a board before it opens: the name, and whether it is shut. */
+export async function fetchBoardAccess(id: string): Promise<BoardAccess> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${id}/access`, {
+    credentials: "include",
+    headers: accessHeader(id),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/** Trades the password for the key, and keeps the key for the rest of the session. */
+export async function unlockBoard(id: string, password: string): Promise<string> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${id}/unlock`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ password }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const { access_token }: UnlockResponse = await res.json();
+  setAccessToken(id, access_token);
+  return access_token;
+}
+
+/**
+ * Sets the password of a board, or takes it off with null. The facilitator alone.
+ * The answer holds a new key, which this tab keeps so that the facilitator reads on.
+ */
+export async function setBoardPassword(
+  id: string,
+  password: string | null,
+): Promise<PasswordResponse> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${id}/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ password, ...boardAuth(id) }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const result: PasswordResponse = await res.json();
+  setAccessToken(id, result.access_token);
+  return result;
 }
 
 /** Reads the settings the server holds, among them the GIPHY key from the Kubernetes secret. */
@@ -89,7 +140,13 @@ export async function importActions(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ source_board_id: sourceBoardId, ...boardAuth(boardId) }),
+    body: JSON.stringify({
+      source_board_id: sourceBoardId,
+      // The key to the source board, when this tab has one. A locked source asks for its own
+      // password, whoever runs the board the actions land on.
+      source_access_token: getAccessToken(sourceBoardId) ?? undefined,
+      ...boardAuth(boardId),
+    }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -176,7 +233,14 @@ export async function fetchAdminTemplates(token: string): Promise<Template[]> {
 
 export async function createAdminTemplate(
   token: string,
-  template: { id: string; name: string; description: string; columns: string[]; position: number },
+  template: {
+    id: string;
+    name: string;
+    description: string;
+    columns: string[];
+    position: number;
+    default_blurred: boolean;
+  },
 ): Promise<void> {
   const res = await fetch(`${getServerUrl()}/api/admin/templates`, {
     method: "POST",
@@ -189,7 +253,13 @@ export async function createAdminTemplate(
 export async function updateAdminTemplate(
   token: string,
   id: string,
-  template: { name: string; description: string; columns: string[]; position: number },
+  template: {
+    name: string;
+    description: string;
+    columns: string[];
+    position: number;
+    default_blurred: boolean;
+  },
 ): Promise<void> {
   const res = await fetch(`${getServerUrl()}/api/admin/templates/${id}`, {
     method: "PUT",
