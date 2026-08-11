@@ -230,3 +230,8 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
   it too, since that route names no participant and would otherwise hand over the whole board.
 - **Sorting** is client-side only (not synced): "newest" or "most-votes" in `utils/sort.ts`.
 - **Tailwind v4** with `@theme` block in `global.css` for custom properties. Fonts loaded via Google Fonts `<link>` in `index.html`.
+- **The version label** on the home page reads the server, not the bundle. `frontend/package.json`
+  stays at 0.0.0, so `GET /api/config` carries `version` from `env!("CARGO_PKG_VERSION")` —
+  `backend/Cargo.toml`, which a release bumps with the other three files. `lib/config.ts` holds
+  the one config request of the session; the GIPHY key rides on it as well. A server that does
+  not answer leaves the label out rather than showing a number it does not have.

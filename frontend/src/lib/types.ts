@@ -129,6 +129,8 @@ export function isLevel10(board: Board | null | undefined): boolean {
 export interface ClientConfig {
   /** Null when the deployment sets no key. The GIF controls then stay hidden. */
   giphy_api_key: string | null;
+  /** The version the server was built with. The web app carries no version of its own. */
+  version: string;
 }
 
 export interface CreateBoardRequest {

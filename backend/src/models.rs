@@ -521,6 +521,10 @@ pub struct CreateBoardResponse {
 pub struct ClientConfig {
     /// None when no key is set. The frontend then leaves out the GIF controls.
     pub giphy_api_key: Option<String>,
+    /// The version of the server, which the release sets in `backend/Cargo.toml`. The web app
+    /// has no version of its own — `frontend/package.json` stays at 0.0.0 — so the label it
+    /// shows comes from here.
+    pub version: String,
 }
 
 #[cfg(test)]

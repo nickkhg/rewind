@@ -13,6 +13,7 @@ import {
 } from "../lib/types";
 import { formatRelativeDate } from "../utils/date";
 import { isTauri, getServerUrl } from "../lib/serverUrl";
+import { useServerVersion } from "../hooks/useServerVersion";
 
 const DEFAULT_COLUMNS = ["Went Well", "To Improve"];
 
@@ -47,6 +48,7 @@ export default function Home() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [joinInput, setJoinInput] = useState("");
   const [joinError, setJoinError] = useState("");
+  const version = useServerVersion();
 
   function selectTemplate(template: Template | null) {
     if (template) {
@@ -483,6 +485,10 @@ export default function Home() {
               Admin
             </a>
           </p>
+          {/* The version of the server. It stays away until the server names it. */}
+          {version && (
+            <p className="text-xs text-muted opacity-60">Rewind v{version}</p>
+          )}
           {isTauri() && (
             <p className="text-xs text-muted opacity-60">
               {getServerUrl()}
