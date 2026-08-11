@@ -43,6 +43,9 @@ pub struct AppState {
     pub last_merge: Arc<RwLock<HashMap<String, MergeSnapshot>>>,
     /// The GIPHY key from the Kubernetes secret. None leaves the GIF controls out of the frontend.
     pub giphy_api_key: Option<String>,
+    /// The Entra app registration this deployment signs people in with. None leaves the server as
+    /// open as it was — no door, and nothing in the frontend that mentions one.
+    pub entra: Option<Arc<crate::auth::EntraAuth>>,
 }
 
 impl AppState {
@@ -50,6 +53,7 @@ impl AppState {
         db: PgPool,
         admin_token_hash: Option<String>,
         giphy_api_key: Option<String>,
+        entra: Option<Arc<crate::auth::EntraAuth>>,
     ) -> Self {
         Self {
             db,
@@ -58,6 +62,7 @@ impl AppState {
             admin_token_hash,
             last_merge: Arc::new(RwLock::new(HashMap::new())),
             giphy_api_key,
+            entra,
         }
     }
 

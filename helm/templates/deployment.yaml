@@ -102,6 +102,24 @@ spec:
                 secretKeyRef:
                   name: {{ include "rewind.fullname" . }}
                   key: giphy-api-key
+            # Entra sign-in. All three empty and the server asks nobody to sign in.
+            - name: ENTRA_TENANT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: entra-tenant-id
+            - name: ENTRA_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: entra-client-id
+            - name: ENTRA_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "rewind.fullname" . }}
+                  key: entra-client-secret
+            - name: PUBLIC_URL
+              value: {{ .Values.env.publicUrl | quote }}
             - name: PORT
               value: {{ .Values.env.port | quote }}
             - name: STATIC_DIR
@@ -115,15 +133,18 @@ spec:
             - name: http
               containerPort: {{ .Values.env.port | int }}
               protocol: TCP
+          # /api/health, not a real route: behind an Entra sign-in every other route answers 401 to
+          # a caller with no account, and a probe that read that as unhealthy would restart the pod
+          # for ever. The health route answers whoever asks.
           livenessProbe:
             httpGet:
-              path: /api/templates
+              path: /api/health
               port: http
             initialDelaySeconds: 5
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /api/templates
+              path: /api/health
               port: http
             initialDelaySeconds: 3
             periodSeconds: 10

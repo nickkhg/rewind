@@ -31,7 +31,7 @@ Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri
 
 **Frontend state:** Zustand store (`boardStore.ts`) holds board, participantId, isFacilitator, isConnected, sortMode. The `useWebSocket` hook connects on mount, sends Join with name + optional facilitator token from `sessionStorage`, and dispatches server messages to the store. Auto-reconnects on close (2s delay).
 
-**Auth model:** No accounts. Facilitator gets a `facilitator_token` on board creation, stored in `sessionStorage`. Only the facilitator can toggle blur. Authors can edit/delete their own tickets. Anyone can vote (idempotent toggle via HashSet). A board can also ask for a password, which the server checks before it hands the board to anyone (see Password-Protected Boards).
+**Auth model:** No accounts. Facilitator gets a `facilitator_token` on board creation, stored in `sessionStorage`. Only the facilitator can toggle blur. Authors can edit/delete their own tickets. Anyone can vote (idempotent toggle via HashSet). A board can also ask for a password, which the server checks before it hands the board to anyone (see Password-Protected Boards). A deployment can put the whole server behind a work account as well (see Signing In with Entra), which says who a person is and nothing about what they may do.
 
 ## WebSocket Protocol
 
@@ -92,6 +92,74 @@ tens of milliseconds of CPU on purpose and a board password is checked at every 
   its own salt, so the answer to "is it the same password" is always "can you open it".
 - **The gate stands before the name.** A person who cannot open the board is never asked who
   they are.
+
+## Signing In with Entra
+
+A board link is the key to a board, and a board password is a second one, but both are things a
+person holds rather than someone a person is. A company that runs every other tool behind its
+directory wants this one there too. So a deployment can name an Entra app registration —
+`ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_CLIENT_SECRET`, from the chart Secret — and the server
+then puts the whole of itself behind a work account: the REST routes, the socket, and the built
+frontend it serves. Name none of the three and nothing changes, which is what `cargo run` and the
+desktop app rely on. Name one or two and the server stops, because an operator who set a client id
+meant to put a door here and a server that started anyway would serve every board to anyone while
+looking configured.
+
+`auth.rs` holds all of it. The OIDC authorization code flow with PKCE runs on the server, so the
+client secret stays in the pod; what the browser holds is one cookie this server wrote.
+
+- **The gate stands outside everything.** `auth::gate` is a middleware, not an extractor, so it
+  covers the static files as well as the routes — a browser asking for a page while signed out is
+  sent to Entra before it is sent the bundle. It answers by what the caller asked for: a `GET` that
+  wants `text/html` is redirected, and everything else — a `fetch`, the socket handshake, the
+  desktop app — gets 401 with the path to the door in the body, because a redirect to Microsoft is
+  nothing a `fetch` can act on. Two routes stand outside the gate: `/api/auth/*`, which is the door,
+  and `/api/health`, which is why the Kubernetes probes read that one and not `/api/templates`.
+- **The session is a cookie and nothing else.** `rewind_session` holds the `Identity` — subject,
+  display name, UPN, and when it runs out — in a `PrivateCookieJar`, encrypted and signed, so a
+  reader can neither read their own name out of it nor write someone else's in. The key is derived
+  from the client secret (`Key::derive_from` over its SHA-512, because it wants 64 bytes), which
+  needs no fourth value, is the same on every replica and across a restart, and stops working when
+  the secret is rotated. There is no session table: a rolling deployment signs nobody out, and the
+  server keeps nothing to lose.
+- **The one-time values of a sign-in live in a cookie too.** `rewind_login` carries the CSRF state,
+  the nonce, the PKCE verifier and where the person was going, for fifteen minutes. `SameSite=Lax`,
+  because the browser comes back from Entra by a top-level navigation and `Lax` allows exactly that.
+  `safe_redirect` keeps the "where they were going" to a path on this server, so a link in an email
+  cannot walk somebody through a real sign-in and out onto a site of its own.
+- **The redirect URI is built, not configured.** From `PUBLIC_URL` when the deployment names it, and
+  otherwise from `X-Forwarded-Proto` and `X-Forwarded-Host`. Reading a header is safe in this one
+  place: Entra refuses any redirect URI that is not on the app registration, so a forged Host buys
+  an error from Entra and nothing else. Nothing else in the file reads them.
+- **The discovery document is cached for an hour.** The keys that sign an id_token arrive with it and
+  Entra rotates them, so a process that asked once at startup would one day stop being able to read
+  one.
+- **`email` is not in a v2 id_token** unless the app registration adds it as an optional claim, so
+  `preferred_username` — the UPN, always there — stands in for it. This is the one that bites.
+- **Authentication, not authorisation.** Anyone in the tenant gets in. Past the door the board
+  decides as it always did: the facilitator token, the editor list, the board password. Signing in
+  makes nobody the facilitator of anything, and `Identity.sub` is carried for a later change that
+  might tie a board to an account.
+- **The name is offered, not imposed.** `/api/config` carries the signed-in user, because it is the
+  one request of the session either way, and `useSignedInName` fills the name field on the home page
+  and the join prompt. Both stay fields — a person may write what the board should call them — and
+  an anonymous board still shows no name.
+- **A sign-out has to go on to Entra.** Clearing our cookie alone would look like nothing happened:
+  the next page asks Entra, Entra still holds the browser's session, and the person is back in
+  without a word. The removal uses the plain `CookieJar` and not the private one, because a private
+  jar drops a cookie it cannot decrypt as it reads the request and then has nothing to write a
+  removal for — a session left over from a rotated secret would otherwise sit there for its full
+  twelve hours.
+- **A session that runs out mid-meeting is found by the socket.** A refused handshake looks like a
+  dropped network to a browser, so `useWebSocket` asks `/api/auth/me` after a socket that never
+  opened, and a 401 sends the browser to the door. Only a 401: a 404 means the server asks nobody to
+  sign in, and no answer at all means the server is down, and neither is a reason to leave a board.
+  `loadConfig` does the same on its one failure, which is what covers `pnpm dev`, where the page
+  comes from Vite and the gate never sees the request for it.
+- **The desktop app is left out.** It loads its pages from disk and calls the server from another
+  origin, so the cookie a sign-in ends with has nowhere to live. `GET /api/health` says whether a
+  server asks for an account, and `Setup` and `App` read it to say so plainly and point at the
+  browser, rather than letting each request fail on its own.
 
 ## Template Defaults
 

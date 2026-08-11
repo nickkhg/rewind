@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { setServerUrl } from "../lib/serverUrl";
+import type { Health } from "../lib/types";
 
 export default function Setup({ onComplete }: { onComplete: () => void }) {
   const [url, setUrl] = useState("http://localhost:3001");
   const [testing, setTesting] = useState(false);
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+  const [status, setStatus] = useState<
+    "idle" | "success" | "error" | "needs-sign-in"
+  >("idle");
   const [error, setError] = useState("");
 
   async function testConnection() {
@@ -14,9 +17,12 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
 
     const trimmed = url.trim().replace(/\/+$/, "");
     try {
-      const res = await fetch(`${trimmed}/api/templates`);
+      // The health route, because it is the one that answers without an account. Testing a real
+      // route against a server that asks for one would come back 401 and read as "unreachable".
+      const res = await fetch(`${trimmed}/api/health`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      setStatus("success");
+      const health: Health = await res.json();
+      setStatus(health.auth_required ? "needs-sign-in" : "success");
     } catch (err) {
       setStatus("error");
       setError(
@@ -92,6 +98,13 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
                 <path d="M3.5 8.5L6.5 11.5L12.5 4.5" />
               </svg>
               Connected successfully
+            </p>
+          )}
+
+          {status === "needs-sign-in" && (
+            <p className="text-sm text-muted animate-card-enter">
+              This server signs people in with their work account, and the desktop
+              app cannot run that sign-in yet. Open it in your browser instead.
             </p>
           )}
 

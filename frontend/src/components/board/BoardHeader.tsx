@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Logo } from "../layout/Logo";
+import { SignedInAs } from "../layout/SignedInAs";
 import { useBoardStore } from "../../store/boardStore";
 import { FacilitatorMenu } from "./FacilitatorMenu";
 import { TimerDisplay } from "./TimerDisplay";
@@ -87,6 +88,8 @@ export function BoardHeader({ send }: BoardHeaderProps) {
           >
             {copied ? "Copied!" : "Share Link"}
           </button>
+          {/* Who you signed in as, on a deployment that asks. Nothing on one that does not. */}
+          <SignedInAs className="hidden md:flex max-w-[14rem]" />
         </div>
       </div>
     </header>

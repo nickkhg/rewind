@@ -24,6 +24,7 @@ import type { BoardAccess, Ticket } from "../lib/types";
 import { fetchBoardAccess, unlockBoard } from "../lib/api";
 import { getAccessToken } from "../lib/boardAccess";
 import { AppShell } from "../components/layout/AppShell";
+import { useSignedInName } from "../hooks/useAuth";
 
 export default function Board() {
   const { id } = useParams<{ id: string }>();
@@ -40,6 +41,15 @@ export default function Board() {
     return sessionStorage.getItem(`participant_name_${id}`) ?? "";
   });
   const [nameInput, setNameInput] = useState("");
+
+  // On a deployment that asks for a work account, Entra already knows the name. It fills the field
+  // rather than settling it: the prompt still stands, and a person may write what the board should
+  // call them. Nothing is filled in once they have started typing.
+  const signedInName = useSignedInName();
+  const [nameTouched, setNameTouched] = useState(false);
+  useEffect(() => {
+    if (signedInName && !nameTouched) setNameInput(signedInName);
+  }, [signedInName, nameTouched]);
 
   // What this reader may know about the board before the gate opens: the name of it, whether it
   // is locked for them, and whether it will ask for their name.
@@ -198,7 +208,10 @@ export default function Board() {
               id="join-name"
               type="text"
               value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
+              onChange={(e) => {
+                setNameTouched(true);
+                setNameInput(e.target.value);
+              }}
               placeholder="e.g. Alex"
               className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
               autoFocus

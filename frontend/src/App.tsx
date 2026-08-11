@@ -1,21 +1,60 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { RouterProvider } from "react-router-dom";
 import { router } from "./router";
 import { ThemeToggle } from "./components/ThemeToggle";
-import { hasServerUrl, isTauri, clearServerUrl } from "./lib/serverUrl";
+import { hasServerUrl, isTauri, clearServerUrl, getServerUrl } from "./lib/serverUrl";
+import { SignInNotSupported } from "./components/layout/SignInNotSupported";
+import { fetchHealth } from "./lib/api";
 import Setup from "./pages/Setup";
 
 const UpdateChecker = lazy(
   () => import("./components/layout/UpdateChecker")
 );
 
+function changeServer(setReady: (ready: boolean) => void) {
+  clearServerUrl();
+  setReady(false);
+}
+
 export default function App() {
   const [ready, setReady] = useState(hasServerUrl);
+
+  // A server that was open when it was saved here can have grown a door since. The desktop app
+  // cannot walk through one, so it asks the one route that answers without an account and says so
+  // plainly, rather than letting each request fail on its own.
+  const [needsBrowser, setNeedsBrowser] = useState(false);
+  useEffect(() => {
+    if (!isTauri() || !ready) return;
+    let live = true;
+    fetchHealth()
+      .then((health) => {
+        if (live) setNeedsBrowser(health.auth_required);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [ready]);
 
   if (!ready) {
     return (
       <>
         <Setup onComplete={() => setReady(true)} />
+        <ThemeToggle />
+      </>
+    );
+  }
+
+  if (needsBrowser) {
+    return (
+      <>
+        <SignInNotSupported
+          url={getServerUrl()}
+          onChangeServer={() => {
+            setNeedsBrowser(false);
+            changeServer(setReady);
+          }}
+        />
         <ThemeToggle />
       </>
     );
@@ -32,10 +71,7 @@ export default function App() {
       )}
       {isTauri() && (
         <button
-          onClick={() => {
-            clearServerUrl();
-            setReady(false);
-          }}
+          onClick={() => changeServer(setReady)}
           aria-label="Change server"
           title="Change server"
           className="fixed bottom-5 left-5 z-50 w-10 h-10 rounded-full grid place-items-center border border-border/40 backdrop-blur-md cursor-pointer hover:scale-110 active:scale-95 transition-transform"
