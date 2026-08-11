@@ -6,13 +6,14 @@ interface DraggableTicketProps {
   ticket: TicketType;
   color: string;
   columnId: string;
+  columnName: string;
   columnRole?: ColumnRole | null;
   voteLimitReached?: boolean;
   isBlurred?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
-export function DraggableTicket({ ticket, color, columnId, columnRole, voteLimitReached, isBlurred, send }: DraggableTicketProps) {
+export function DraggableTicket({ ticket, color, columnId, columnName, columnRole, voteLimitReached, isBlurred, send }: DraggableTicketProps) {
   const {
     attributes,
     listeners,
@@ -54,6 +55,7 @@ export function DraggableTicket({ ticket, color, columnId, columnRole, voteLimit
         <TicketCard
           ticket={ticket}
           color={color}
+          columnName={columnName}
           columnRole={columnRole}
           voteLimitReached={voteLimitReached}
           send={send}

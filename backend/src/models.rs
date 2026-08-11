@@ -18,6 +18,10 @@ pub fn valid_rock_status(status: &str) -> bool {
     status == "on_track" || status == "off_track"
 }
 
+/// The columns whose cards carry a done mark: the actions of this retro and the actions carried
+/// over from the last one. A card anywhere else is an observation, which is never finished.
+pub const DONE_COLUMN_ROLES: [&str; 2] = [ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS];
+
 /// Column names that only the two role columns can use.
 pub const RESERVED_COLUMN_NAMES: [&str; 4] = [
     "actions",
@@ -70,6 +74,9 @@ pub struct Ticket {
     pub gif: Option<Gif>,
     /// `on_track` or `off_track` on a card in the Rocks column. None everywhere else.
     pub rock_status: Option<String>,
+    /// When the action was marked done. None on an open action and on every card outside the
+    /// two action columns.
+    pub done_at: Option<DateTime<Utc>>,
 }
 
 /// One line of the scorecard: a number the team reads each week, and how it stands.
@@ -513,6 +520,7 @@ mod tests {
             }],
             gif: None,
             rock_status: None,
+            done_at: None,
         }
     }
 

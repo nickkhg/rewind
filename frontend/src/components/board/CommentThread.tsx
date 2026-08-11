@@ -8,31 +8,26 @@ import type { ClientMessage, Gif, TicketComment } from "../../lib/types";
 /** Below this many characters left, the composer starts to count down. */
 const COUNTDOWN_FROM = 80;
 
-interface CommentToggleProps {
+interface CommentButtonProps {
   count: number;
-  open: boolean;
-  threadId: string;
-  onToggle: () => void;
+  onOpen: () => void;
 }
 
 /**
- * The mark in the footer of a card that opens the thread. It carries the count, so that a
- * closed card still says how much discussion sits under it.
+ * The mark in the footer of a card. It carries the count, so a card says how much discussion
+ * sits under it without holding any of it, and it opens the card where the discussion lives.
  */
-export function CommentToggle({ count, open, threadId, onToggle }: CommentToggleProps) {
-  const label = count === 0 ? "Add a comment" : open ? "Hide comments" : `Show comments (${count})`;
+export function CommentButton({ count, onOpen }: CommentButtonProps) {
+  const label =
+    count === 0 ? "Open the card and comment" : `Open the card · ${count} ${count === 1 ? "comment" : "comments"}`;
 
   return (
     <button
-      onClick={onToggle}
+      onClick={onOpen}
       onPointerDown={(e) => e.stopPropagation()}
-      aria-expanded={open}
-      aria-controls={threadId}
       aria-label={label}
       title={label}
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-        open ? "bg-canvas text-ink ring-1 ring-border" : "bg-canvas text-muted hover:text-ink"
-      }`}
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-canvas text-muted hover:text-ink transition-colors"
     >
       <svg
         viewBox="0 0 14 14"
@@ -59,12 +54,14 @@ interface CommentThreadProps {
   isAnonymous: boolean;
   participantId: string | null;
   isPrivileged: boolean;
+  /** True when the reader opened the card to write, so the caret starts in the composer. */
+  autoFocus?: boolean;
   send: (msg: ClientMessage) => void;
 }
 
 /**
- * The comments of one card, set as notes in the margin: a rule down the left in the color of
- * the column, the writer as a hanging label, and the remark under it.
+ * The comments of one card, set as notes in the margin: a pen mark in the color of the column,
+ * the remark, and the writer signed under it.
  */
 export function CommentThread({
   threadId,
@@ -74,6 +71,7 @@ export function CommentThread({
   isAnonymous,
   participantId,
   isPrivileged,
+  autoFocus,
   send,
 }: CommentThreadProps) {
   const [draft, setDraft] = useState("");
@@ -83,10 +81,10 @@ export function CommentThread({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
 
-  // The thread opens because someone wants to write in it.
+  // Someone who opened the card from the comment mark came here to write.
   useEffect(() => {
-    composerRef.current?.focus();
-  }, []);
+    if (autoFocus) composerRef.current?.focus();
+  }, [autoFocus]);
 
   // A GIF on its own is a whole remark, which is most of what a reaction is.
   const [draftGif, setDraftGif] = useState<Gif | null>(null);
@@ -147,18 +145,10 @@ export function CommentThread({
   }
 
   return (
-    <div
-      id={threadId}
-      // A recessed strip at the foot of the card: the discussion, not the card itself.
-      className="animate-thread-unfurl mt-2.5 -mx-3 -mb-3 px-3 pt-2.5 pb-3 rounded-b-lg bg-ink/[0.035] border-t border-border/60"
-      // The whole card is a drag handle. Reading and writing here must not move it.
-      onPointerDown={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
-    >
-      {comments.length === 0 ? (
-        <p className="text-xs text-muted mb-2">No comments yet. Start the thread.</p>
-      ) : (
-        <ul className="space-y-3 mb-2.5">
+    <div id={threadId}>
+      {/* An empty thread says nothing: the composer under it is the invitation. */}
+      {comments.length > 0 && (
+        <ul className="space-y-3.5 mb-3">
           {comments.map((comment) => {
             const isCommentAuthor = comment.author_id === participantId;
             const editing = editingId === comment.id;
@@ -167,7 +157,7 @@ export function CommentThread({
               <li key={comment.id} className="group/comment relative pl-4">
                 {/* The pen mark in the margin that every note hangs from. */}
                 <span
-                  className="absolute left-0 top-[0.5rem] w-2.5 h-[2px] rounded-full"
+                  className="absolute left-0 top-[0.62rem] w-2.5 h-[2px] rounded-full"
                   style={{ backgroundColor: color }}
                   aria-hidden
                 />
@@ -183,11 +173,15 @@ export function CommentThread({
                           e.preventDefault();
                           handleSaveEdit(comment);
                         }
-                        if (e.key === "Escape") setEditingId(null);
+                        // Escape leaves the edit. The card that holds the thread stays open.
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setEditingId(null);
+                        }
                       }}
                       rows={2}
                       maxLength={MAX_COMMENT_LENGTH}
-                      className="w-full rounded border border-border px-2 py-1 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 bg-surface"
+                      className="w-full rounded border border-border px-2 py-1 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 bg-surface"
                       autoFocus
                     />
                     {editGif && (
@@ -213,13 +207,13 @@ export function CommentThread({
                 ) : (
                   <>
                     {comment.content && (
-                      <p className="text-[13px] leading-snug whitespace-pre-wrap break-words">
+                      <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">
                         {comment.content}
                       </p>
                     )}
                     {comment.gif && <GifAttachment gif={comment.gif} size="comment" />}
                     {/* The note is signed under it, the way a margin note is. */}
-                    <div className="flex items-baseline gap-1.5 mt-0.5 text-[10px] text-muted">
+                    <div className="flex items-baseline gap-1.5 mt-1 text-[10px] text-muted">
                       {!isAnonymous && comment.author_name && (
                         <span className="uppercase tracking-wider truncate max-w-[110px]">
                           {comment.author_name}
@@ -272,9 +266,9 @@ export function CommentThread({
           }
         }}
         placeholder="Write a comment"
-        rows={draft ? 2 : 1}
+        rows={draft ? 3 : 2}
         maxLength={MAX_COMMENT_LENGTH}
-        className="w-full rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 placeholder:text-muted"
+        className="w-full rounded-md border border-border bg-canvas px-2.5 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-accent/40 placeholder:text-muted"
       />
 
       {draftGif && (

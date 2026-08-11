@@ -1,11 +1,11 @@
 import { useState } from "react";
 import type { Gif } from "../../lib/types";
 
-/** How tall a GIF may stand. A card gets more room than a comment. */
-const MAX_HEIGHT = { card: 170, comment: 120 } as const;
+/** How tall a GIF may stand. A card gets more room than a comment, and the modal more again. */
+const MAX_HEIGHT = { card: 170, comment: 120, modal: 260 } as const;
 
-/** How wide a GIF may spread inside a board column. */
-const MAX_WIDTH = 220;
+/** How wide a GIF may spread. A board column is narrow; the modal is not. */
+const MAX_WIDTH = { card: 220, comment: 220, modal: 340 } as const;
 
 /**
  * A hidden GIF needs a heavier hand than hidden words.
@@ -47,7 +47,7 @@ export function GifAttachment({ gif, size, blurred, onRemove }: GifAttachmentPro
   // natural width is a ceiling as well: a GIF drawn wider than its own frame only looks soft.
   const ratio = gif.width > 0 && gif.height > 0 ? gif.height / gif.width : 0.75;
   const maxHeight = MAX_HEIGHT[size];
-  const width = Math.min(gif.width, MAX_WIDTH, Math.round(maxHeight / ratio));
+  const width = Math.min(gif.width, MAX_WIDTH[size], Math.round(maxHeight / ratio));
 
   // A picture nobody may read yet must not move, or the motion gives it away.
   const showMotion = playing && !blurred;
