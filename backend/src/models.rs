@@ -525,6 +525,9 @@ pub struct ClientConfig {
     /// has no version of its own — `frontend/package.json` stays at 0.0.0 — so the label it
     /// shows comes from here.
     pub version: String,
+    /// Whether this deployment asks for a work account, and who the reader signed in as. Both are
+    /// off and absent on a deployment that named no Entra app registration.
+    pub auth: crate::auth::AuthConfig,
 }
 
 #[cfg(test)]

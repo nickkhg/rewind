@@ -5,6 +5,7 @@ import type {
   ClientConfig,
   CreateBoardRequest,
   CreateBoardResponse,
+  Health,
   ImportResult,
   LabelCount,
   MyBoardSummary,
@@ -85,10 +86,27 @@ export async function setBoardPassword(
   return result;
 }
 
-/** Reads the settings the server holds, among them the GIPHY key from the Kubernetes secret. */
+/**
+ * Reads the settings the server holds, among them the GIPHY key from the Kubernetes secret.
+ * The cookie goes with it, because the answer names who is signed in.
+ */
 export async function fetchConfig(): Promise<ClientConfig> {
-  const res = await fetch(`${getServerUrl()}/api/config`);
+  const res = await fetch(`${getServerUrl()}/api/config`, {
+    credentials: "include",
+  });
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * Asks whether the server is up, and whether it asks for a work account.
+ *
+ * The one route that answers whoever asks, signed in or not. The desktop app reads it to say why a
+ * server will not open, and the Kubernetes probes read it for the same reason.
+ */
+export async function fetchHealth(): Promise<Health> {
+  const res = await fetch(`${getServerUrl()}/api/health`);
+  if (!res.ok) throw new Error(`The server answered ${res.status}`);
   return res.json();
 }
 

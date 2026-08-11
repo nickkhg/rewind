@@ -1,3 +1,4 @@
+mod auth;
 mod db;
 mod error;
 mod models;
@@ -57,10 +58,22 @@ async fn main() {
         tracing::info!("no GIPHY key set — GIF controls are off");
     }
 
-    let state = AppState::new(db, admin_token_hash, giphy_api_key);
+    // The three values of the Entra app registration, or nothing at all. Nothing leaves the server
+    // open to whoever holds a board link, as it has always been.
+    let entra = auth::EntraAuth::from_env();
+    if entra.is_none() {
+        tracing::info!("no Entra app registration set — the server asks nobody to sign in");
+    }
+
+    let state = AppState::new(db, admin_token_hash, giphy_api_key, entra);
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_default();
 
     let mut app = Router::new()
+        .route("/api/health", get(routes::config::health))
+        .route("/api/auth/login", get(auth::login))
+        .route("/api/auth/callback", get(auth::callback))
+        .route("/api/auth/logout", get(auth::logout))
+        .route("/api/auth/me", get(auth::me))
         .route("/api/config", get(routes::config::get_config))
         .route("/api/templates", get(routes::boards::list_templates))
         .route("/api/boards", post(routes::boards::create_board))
@@ -118,6 +131,14 @@ async fn main() {
     }
 
     let app = app
+        // The gate goes on last of the three, so that it sits inside the CORS layer: a preflight is
+        // answered before anyone is asked to sign in, and a 401 still carries the CORS headers that
+        // let the desktop app read the reason. It wraps the static files as well, so a browser that
+        // asks for a page while signed out is sent to Entra before it is sent the bundle.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::gate,
+        ))
         .layer(
             CorsLayer::new()
                 // The last one carries the key to a locked board, which a GET has no body for.

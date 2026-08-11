@@ -68,10 +68,38 @@ secrets:
   # Keeping it here holds it out of the image and out of git, and lets it rotate without a
   # rebuild, but it does not hide it from end users — use a domain-restricted key.
   giphyApiKey: ""
+  # Entra sign-in. Leave all three empty and the server asks nobody to sign in, which is how it
+  # has always worked: a board is open to whoever holds its link.
+  #
+  # Set all three and the whole app goes behind a work account — the API, the socket, and the page
+  # itself. Anyone in the tenant gets in; who may do what on a board is still the facilitator token,
+  # the editor list and the board password, exactly as before.
+  #
+  # All three or none. Half a configuration stops the server rather than serving every board to
+  # anyone while looking configured.
+  #
+  # The app registration needs to be single-tenant, platform **Web** (only a confidential client may
+  # hold a secret), with the redirect URI
+  #   https://<your host>/api/auth/callback
+  # A sign-out also sends the browser back to https://<your host>/, so add that as a redirect URI
+  # too, or Entra ends the sign-out on a page of its own.
+  entra:
+    # The directory (tenant) ID of the app registration.
+    tenantId: ""
+    # The application (client) ID.
+    clientId: ""
+    # A client secret of the app registration. It never leaves the pod: the server runs the whole
+    # sign-in and the browser only ever holds an encrypted cookie this server wrote.
+    clientSecret: ""
 
 env:
   port: "3001"
   rustLog: "info"
+  # The origin the browser reaches Rewind on, for example https://rewind.example.com — the redirect
+  # URI of a sign-in is built from it. Left empty, each request names its own host, from the
+  # X-Forwarded-Proto and X-Forwarded-Host the ingress sets, which is right for a normal ingress.
+  # Set it when a proxy in front rewrites the host, or when the sign-in comes back to the wrong URL.
+  publicUrl: ""
 
 postgres:
   image:

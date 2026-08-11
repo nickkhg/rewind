@@ -31,6 +31,7 @@ No accounts needed. The facilitator creates a board, shares a link, and the team
 - **Level 10 meetings** — a board made from the Level 10 template adds a scorecard (metric, goal, this week, on track) kept by the facilitator, an on-track / off-track mark on the cards in the Rocks column, and a 1–10 meeting rating from each participant with the average in the header. Every other board shows none of these
 - **Custom columns** — or define your own column layout
 - **Anonymous boards** — optional name-free mode (enabled by default)
+- **Entra sign-in (optional)** — name an Entra app registration and the whole app goes behind a work account; name none and it stays open, as it has always been. The signed-in name pre-fills the join field (see [Entra Sign-In](#entra-sign-in))
 - **Share link** — one-click copy to clipboard
 - **Dark mode** — light and dark themes with system preference detection
 - **Desktop app** — native macOS window via Tauri v2 with `rewind://` deep links
@@ -102,8 +103,61 @@ cargo tauri dev
 | `PORT` | No | `3001` | Port the backend listens on |
 | `STATIC_DIR` | No | — | Path to built frontend assets. When set, the backend serves them and handles SPA routing |
 | `ADMIN_TOKEN_HASH` | No | — | Argon2id hash for admin access (see [Admin Interface](#admin-interface)). If omitted, admin routes return 404 |
+| `GIPHY_API_KEY` | No | — | GIPHY web SDK key. Omit and the GIF controls stay hidden. The browser holds this key, so use a domain-restricted one |
+| `ENTRA_TENANT_ID` | No | — | Directory (tenant) ID of the Entra app registration (see [Entra Sign-In](#entra-sign-in)) |
+| `ENTRA_CLIENT_ID` | No | — | Application (client) ID |
+| `ENTRA_CLIENT_SECRET` | No | — | Client secret. It stays in the pod; the browser never sees it |
+| `PUBLIC_URL` | No | — | The origin browsers reach Rewind on, e.g. `https://rewind.example.com`. Only needed when a proxy rewrites the host — otherwise the redirect URI is derived from `X-Forwarded-Proto` / `X-Forwarded-Host` |
 | `VITE_API_URL` | No | — | Frontend override for backend URL (only needed if the frontend is hosted separately from the backend) |
 | `RUST_LOG` | No | `info` | Log level filter (e.g. `debug`, `rewind_backend=debug`) |
+
+The three `ENTRA_*` variables go together: set all three to put the app behind a work
+account, or none to leave it open. Setting one or two stops the server on purpose, rather
+than serving every board to anyone while looking configured.
+
+## Entra Sign-In
+
+By default a board is open to whoever holds its link. Set the three `ENTRA_*` variables and
+the whole app goes behind Microsoft Entra sign-in instead — the API, the WebSocket, and the
+page itself. Anyone in the tenant gets in; who may do what on a board is still the
+facilitator token, the editor list and the board password, exactly as before.
+
+The server runs the OIDC authorization code flow with PKCE itself, so the client secret never
+reaches the browser. What the browser holds is one encrypted cookie the server wrote, good for
+12 hours.
+
+**In Entra**, create an app registration:
+
+- Single tenant, platform **Web** — only a confidential client may hold a secret.
+- Redirect URIs:
+  - `https://<your host>/api/auth/callback` — where sign-in returns
+  - `https://<your host>/` — where sign-out returns. Without it Entra ends the sign-out on a
+    page of its own
+- Add a client secret.
+
+**In the chart**, fill in `secrets.entra`:
+
+```yaml
+secrets:
+  entra:
+    tenantId: "<directory (tenant) ID>"
+    clientId: "<application (client) ID>"
+    clientSecret: "<client secret>"
+```
+
+Two things worth knowing:
+
+- **The name comes from Entra.** The join field is pre-filled with your display name and the
+  header shows who you are, with a way out. It is still a field — a person may write what the
+  board should call them, and an anonymous board shows no name at all.
+- **The desktop app cannot sign in.** It loads its pages from disk and talks to the server
+  from another origin, so there is nowhere for the cookie to live. Against a server that asks
+  for an account it says so and points at the browser. Use the browser for a signed-in
+  deployment.
+
+Health checks read `GET /api/health`, which answers whoever asks and reports whether the
+server wants an account. Everything else answers `401` — a probe pointed at a real route
+would restart the pod for ever.
 
 ### Production Build
 

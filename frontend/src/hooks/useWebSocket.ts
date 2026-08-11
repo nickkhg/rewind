@@ -3,6 +3,7 @@ import { useBoardStore } from "../store/boardStore";
 import type { ClientMessage, ServerMessage } from "../lib/types";
 import { getServerUrl } from "../lib/serverUrl";
 import { clearAccessToken } from "../lib/boardAccess";
+import { redirectIfSignedOut } from "../lib/auth";
 
 function getWsUrl(boardId: string): string {
   const base = getServerUrl();
@@ -46,8 +47,12 @@ export function useWebSocket(
 
       const ws = new WebSocket(getWsUrl(boardId));
       wsRef.current = ws;
+      // A handshake the server refused looks the same to a browser as a network that dropped, so
+      // the difference has to be asked for. It is asked once, after a socket that never opened.
+      let everOpened = false;
 
       ws.onopen = () => {
+        everOpened = true;
         setConnected(true);
         const storedId = sessionStorage.getItem(`participant_id_${boardId}`);
         const facToken = sessionStorage.getItem(`facilitator_token_${boardId}`);
@@ -88,9 +93,21 @@ export function useWebSocket(
 
       ws.onclose = () => {
         setConnected(false);
-        if (alive) {
-          reconnectTimer = setTimeout(connect, 2000);
+        if (!alive) return;
+
+        // A sign-in that ran out mid-meeting turns the socket away at the handshake, and reconnecting
+        // for ever would leave the board reading "Reconnecting..." with no way out. So a socket that
+        // never opened asks the server whether the session is still there, and the answer sends the
+        // browser to the door. On an open server this asks once and learns nothing, which costs a
+        // request per failed reconnect and keeps the retry honest.
+        if (!everOpened) {
+          redirectIfSignedOut().then((leaving) => {
+            if (!leaving && alive) reconnectTimer = setTimeout(connect, 2000);
+          });
+          return;
         }
+
+        reconnectTimer = setTimeout(connect, 2000);
       };
 
       ws.onerror = () => {

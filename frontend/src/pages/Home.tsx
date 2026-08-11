@@ -14,6 +14,8 @@ import {
 import { formatRelativeDate } from "../utils/date";
 import { isTauri, getServerUrl } from "../lib/serverUrl";
 import { useServerVersion } from "../hooks/useServerVersion";
+import { useSignedInName } from "../hooks/useAuth";
+import { SignedInAs } from "../components/layout/SignedInAs";
 
 const DEFAULT_COLUMNS = ["Went Well", "To Improve"];
 
@@ -49,6 +51,14 @@ export default function Home() {
   const [joinInput, setJoinInput] = useState("");
   const [joinError, setJoinError] = useState("");
   const version = useServerVersion();
+
+  // On a deployment that asks for a work account, the name field starts filled with the one Entra
+  // holds. It is still a field: a person may write what the board should call them instead.
+  const signedInName = useSignedInName();
+  const [nameTouched, setNameTouched] = useState(false);
+  useEffect(() => {
+    if (signedInName && !nameTouched) setName(signedInName);
+  }, [signedInName, nameTouched]);
 
   function selectTemplate(template: Template | null) {
     if (template) {
@@ -153,7 +163,10 @@ export default function Home() {
                 id="name"
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setNameTouched(true);
+                  setName(e.target.value);
+                }}
                 placeholder="e.g. Alex"
                 className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 bg-canvas"
               />
@@ -477,6 +490,8 @@ export default function Home() {
         )}
 
         <div className="text-center mt-4 space-y-1">
+          {/* Who you signed in as. Nothing on a deployment that asks nobody to. */}
+          <SignedInAs className="justify-center" />
           <p>
             <a
               href="/admin"

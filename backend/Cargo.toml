@@ -17,6 +17,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "migrate"] }
 argon2 = { version = "0.5", features = ["std"] }
-axum-extra = { version = "0.10", features = ["cookie"] }
+# `cookie-private` encrypts and signs the session cookie of an Entra sign-in; `cookie-key-expansion`
+# is what derives its key from the client secret (see `auth.rs`).
+axum-extra = { version = "0.10", features = ["cookie", "cookie-private", "cookie-key-expansion"] }
 time = "0.3"
 http = "1.4.0"
+# The OIDC authorization code flow of `auth.rs`. rustls, to match sqlx and to keep OpenSSL out of
+# the Alpine image.
+openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
+url = "2"
+sha2 = "0.10"

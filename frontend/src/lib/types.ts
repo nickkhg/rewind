@@ -131,6 +131,30 @@ export interface ClientConfig {
   giphy_api_key: string | null;
   /** The version the server was built with. The web app carries no version of its own. */
   version: string;
+  /** Whether this server asks for a work account, and who this reader signed in as. */
+  auth: AuthConfig;
+}
+
+export interface AuthConfig {
+  /** False on a deployment that named no Entra app registration. Nothing about signing in shows. */
+  enabled: boolean;
+  /** Who the reader is. Always set when `enabled`, because the request came through the gate. */
+  user: AuthUser | null;
+}
+
+export interface AuthUser {
+  /** The account, not the person. Nothing keys off it yet. */
+  sub: string;
+  /** The display name from Entra, which is what fills the join field. */
+  name: string;
+  /** The user principal name, or null on the rare account that has none. */
+  email: string | null;
+}
+
+/** What the one open route says: the server is up, and whether it asks for a work account. */
+export interface Health {
+  status: string;
+  auth_required: boolean;
 }
 
 export interface CreateBoardRequest {
