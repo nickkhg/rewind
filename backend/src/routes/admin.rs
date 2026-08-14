@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db;
 use crate::error::AppError;
+use crate::models::RESERVED_COLUMN_NAMES;
 use crate::password;
 use crate::state::AppState;
 
@@ -260,6 +261,39 @@ pub async fn update_template(
         return Err(AppError::NotFound("Template not found".to_string()));
     }
     Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Brings the columns of a template across to the boards already made from it.
+///
+/// A template is read once, at creation, so a board carries a copy of the columns and never
+/// looks at the template again. This is the one route that changes that copy: it renames by
+/// position and adds what the board has not got. It deletes nothing, so a board keeps every
+/// card it holds and every column the template no longer names.
+pub async fn apply_template(
+    _auth: AdminAuth,
+    State(state): State<AppState>,
+    Path(template_id): Path<String>,
+) -> Result<Json<crate::models::ApplyTemplateResult>, AppError> {
+    let template = db::get_template(&state.db, &template_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Template not found".to_string()))?;
+
+    // The same names a new board would get: the two action columns are the board's own and a
+    // template that asks for one of them is asking for a column that is already there.
+    let names: Vec<String> = template
+        .columns
+        .into_iter()
+        .filter(|name| !RESERVED_COLUMN_NAMES.contains(&name.trim().to_lowercase().as_str()))
+        .collect();
+
+    let result = db::apply_template_to_boards(&state.db, &template_id, &names).await?;
+
+    // A board open in someone's browser holds the old column names until it is told otherwise.
+    for board_id in &result.changed_board_ids {
+        crate::routes::ws::broadcast_board_state(&state, board_id).await;
+    }
+
+    Ok(Json(result))
 }
 
 pub async fn delete_template(

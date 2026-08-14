@@ -52,7 +52,7 @@ export function Column({ column, color, send }: ColumnProps) {
       <div className="space-y-2.5 overflow-y-auto min-h-0 flex-1">
         {isArchive && column.tickets.length === 0 && (
           <p className="text-xs text-muted leading-relaxed border border-dashed border-border rounded-lg px-3 py-4">
-            Nothing carried over yet. The facilitator can copy the actions of an earlier retro from
+            Nothing carried over yet. The facilitator can copy cards from an earlier board in
             Board Settings.
           </p>
         )}

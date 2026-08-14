@@ -197,9 +197,19 @@ export interface ActionSourceBoard {
   title: string;
   created_at: string;
   action_count: number;
+  /** Every card on the board. Any column can supply a carry-over, not the actions alone. */
+  card_count: number;
   labels: string[];
-  /** True when the board asks for a password before it hands its actions over. */
+  /** True when the board asks for a password before it hands its cards over. */
   is_locked: boolean;
+}
+
+/** What an apply run did to the boards already made from a template. */
+export interface ApplyTemplateResult {
+  boards_examined: number;
+  boards_changed: number;
+  columns_renamed: number;
+  columns_added: number;
 }
 
 export interface LabelCount {

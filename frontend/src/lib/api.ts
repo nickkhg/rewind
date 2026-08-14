@@ -1,5 +1,6 @@
 import type {
   ActionSourceBoard,
+  ApplyTemplateResult,
   Board,
   BoardAccess,
   ClientConfig,
@@ -150,9 +151,14 @@ export async function fetchActionSources(
   return res.json();
 }
 
+/**
+ * Copies cards from a column of another board into a column of this one. Naming no column keeps
+ * the carry-over this route was written for: the actions of the source into Previous Actions.
+ */
 export async function importActions(
   boardId: string,
   sourceBoardId: string,
+  columns: { sourceColumnId?: string; targetColumnId?: string } = {},
 ): Promise<ImportResult> {
   const res = await fetch(`${getServerUrl()}/api/boards/${boardId}/actions/import`, {
     method: "POST",
@@ -160,6 +166,8 @@ export async function importActions(
     credentials: "include",
     body: JSON.stringify({
       source_board_id: sourceBoardId,
+      source_column_id: columns.sourceColumnId,
+      target_column_id: columns.targetColumnId,
       // The key to the source board, when this tab has one. A locked source asks for its own
       // password, whoever runs the board the actions land on.
       source_access_token: getAccessToken(sourceBoardId) ?? undefined,
@@ -285,6 +293,22 @@ export async function updateAdminTemplate(
     body: JSON.stringify(template),
   });
   if (!res.ok) throw new Error(await res.text());
+}
+
+/**
+ * Brings the columns of a template across to the boards already made from it. A board is a copy
+ * of its template, so this is the only thing that reaches back to one.
+ */
+export async function applyAdminTemplate(
+  token: string,
+  id: string,
+): Promise<ApplyTemplateResult> {
+  const res = await fetch(`${getServerUrl()}/api/admin/templates/${id}/apply`, {
+    method: "POST",
+    headers: adminHeaders(token),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 export async function deleteAdminTemplate(token: string, id: string): Promise<void> {

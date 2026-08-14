@@ -6,6 +6,7 @@ use serde::Deserialize;
 use time::Duration;
 
 use crate::db;
+use crate::db::CopyOutcome;
 use crate::error::AppError;
 use crate::models::{
     normalize_labels, read_password, ActionSourceBoard, BoardAccessView, CreateBoardRequest,
@@ -365,6 +366,12 @@ pub struct BoardAuth {
 #[derive(Debug, Deserialize)]
 pub struct ImportActionsRequest {
     pub source_board_id: String,
+    /// Which column the cards come from, and which one they land in. Absent means the carry-over
+    /// this route was written for: the Actions of the source board into Previous Actions here.
+    #[serde(default)]
+    pub source_column_id: Option<String>,
+    #[serde(default)]
+    pub target_column_id: Option<String>,
     /// The key to the source board, when that board asks for a password. A caller who is the
     /// facilitator or an editor of it needs none.
     #[serde(default)]
@@ -373,7 +380,7 @@ pub struct ImportActionsRequest {
     pub auth: BoardAuth,
 }
 
-/// Copies the actions of another board into the Previous Actions column of this board.
+/// Copies cards from a column of another board into a column of this one.
 pub async fn import_actions(
     State(state): State<AppState>,
     jar: CookieJar,
@@ -382,7 +389,7 @@ pub async fn import_actions(
 ) -> Result<Json<ImportResult>, AppError> {
     if req.source_board_id == board_id {
         return Err(AppError::BadRequest(
-            "A board cannot copy its own actions".to_string(),
+            "A board cannot copy from itself".to_string(),
         ));
     }
 
@@ -405,9 +412,28 @@ pub async fn import_actions(
         other => other,
     })?;
 
-    let result = db::copy_actions(&state.db, &req.source_board_id, &board_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound("That board has no actions to copy".to_string()))?;
+    let outcome = db::copy_cards(
+        &state.db,
+        &req.source_board_id,
+        req.source_column_id.as_deref(),
+        &board_id,
+        req.target_column_id.as_deref(),
+    )
+    .await?;
+
+    let result = match outcome {
+        CopyOutcome::Copied(result) => result,
+        CopyOutcome::NoSourceColumn => {
+            return Err(AppError::NotFound(
+                "That board has no such column any more".to_string(),
+            ))
+        }
+        CopyOutcome::NoTargetColumn => {
+            return Err(AppError::NotFound(
+                "This board has no such column any more".to_string(),
+            ))
+        }
+    };
 
     crate::routes::ws::broadcast_board_state(&state, &board_id).await;
 
