@@ -102,6 +102,7 @@ async fn main() {
         .route("/ws/boards/{id}", get(routes::ws::ws_handler))
         .route("/api/admin/verify", post(routes::admin::verify_token))
         .route("/api/admin/stats", get(routes::admin::global_stats))
+        .route("/api/admin/restart", post(routes::admin::restart_service))
         .route("/api/admin/boards", get(routes::admin::list_boards))
         .route(
             "/api/admin/boards/{id}",

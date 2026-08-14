@@ -3789,7 +3789,7 @@ dependencies = [
 
 [[package]]
 name = "rewind-backend"
-version = "1.11.0"
+version = "1.12.0"
 dependencies = [
  "argon2",
  "axum",
@@ -3814,7 +3814,7 @@ dependencies = [
 
 [[package]]
 name = "rewind-desktop"
-version = "1.11.0"
+version = "1.12.0"
 dependencies = [
  "serde",
  "serde_json",

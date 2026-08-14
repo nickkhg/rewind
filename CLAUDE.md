@@ -61,13 +61,23 @@ team did not close come back to the same column of the next meeting.
 **A board is a copy of its template, not a view of it.** `create_board` reads the column names
 once and writes rows to `columns`; from then on the template can be renamed, re-columned or
 deleted and the board never notices. `POST /api/admin/templates/{id}/apply` is the one route that
-reaches back: it renames by position over the columns that are neither Previous Actions nor
-Actions, adds a name the board has no column for, and renumbers so that Actions stays last. It
-deletes nothing, so no card is ever lost by an apply and a board keeps a column the template no
-longer names. A name that would be added as "rocks" on a Level 10 board takes `ROLE_ROCKS`, as it
-would at creation. Each changed board is rebroadcast, because a board open in someone's browser
-holds the old names until it is told otherwise. The admin reads the counts back:
-`{ boards_examined, boards_changed, columns_renamed, columns_added }`.
+reaches back. It deletes nothing, so no card is ever lost by an apply and a board keeps a column
+the template no longer names. Each changed board is rebroadcast, because a board open in
+someone's browser holds the old columns until it is told otherwise. The admin reads the counts
+back: `{ boards_examined, boards_changed, columns_renamed, columns_added, columns_moved }`.
+
+**The names take the columns in two passes, and the order matters.** First by name: a name the
+board already has takes that column wherever it stands, which is what carries an *order* across.
+Then by position: the names that matched nothing take the columns that matched nothing, in the
+order both are in, which is what carries a *rename* across ("Segue" becomes "Solved" and keeps
+its cards). A name still without a column becomes one. Name first and position second is what
+stops a reordered template from renaming the columns under the cards of a board. A name added as
+"rocks" on a Level 10 board takes `ROLE_ROCKS`, as it would at creation, and Actions stays last.
+
+**Column order lives in the template.** The admin form holds the list, with a number and a pair
+of arrows on each row, and "Apply to boards" carries the order to the boards already made. A
+board has no reorder control of its own: `columns.position` is written by `create_board` and by
+an apply, and by nothing else.
 
 REST carries these three, not the WebSocket protocol, because each one answers the caller with a result or an error. `db::is_board_privileged` applies the same rule as the WebSocket handler: facilitator token, facilitator cookie, or a place in the editor list.
 
@@ -173,6 +183,18 @@ client secret stays in the pod; what the browser holds is one cookie this server
   origin, so the cookie a sign-in ends with has nowhere to live. `GET /api/health` says whether a
   server asks for an account, and `Setup` and `App` read it to say so plainly and point at the
   browser, rather than letting each request fail on its own.
+
+## Restarting the Service
+
+`POST /api/admin/restart` ends the process with exit code 0, and Kubernetes starts the container
+again because the pod carries `restartPolicy: Always`. The code is 0 because the stop is asked
+for and is not a fault. The answer goes out before the exit — a handler that exits in place
+writes no response, and the admin page would report a network error for a restart that worked.
+
+Nothing on a board is lost: the boards are in PostgreSQL and a browser opens its socket again
+after two seconds. What goes is what `AppState` holds in memory — the participant counts and a
+pending merge undo. The chart runs one replica; with more, this stops the pod that answers the
+request and no other.
 
 ## Template Defaults
 
@@ -299,6 +321,14 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
   control, because you cannot read the card yet. Anyone can comment, the writer can edit, and the
   writer, the facilitator, or an editor can delete. A merge moves the comments of the source card
   onto the target card, and an undo sends them back.
+- **A drag reads by where it ends.** In its own column, a card dropped on another card merges the
+  two — two people wrote the same thing — and the undo toast follows. Dropped anywhere in another
+  column, the card moves there (`MoveTicket`), a card under the pointer included: a full column
+  leaves almost no gap to aim at, so the drop cannot ask the reader to hit one. The column lights
+  up while a card from elsewhere is over it, and a card shows the merge ring only for a card of
+  its own column. `db::move_ticket` clears the marks the target column cannot hold — a done mark
+  outside the two action columns, a rock status outside Rocks — because the server refuses to set
+  either one there and the card would otherwise carry a mark nothing can clear.
 - **Card rotation** is seeded from ticket ID hash (deterministic, -1° to 1°).
 - **Blur** is CSS `filter: blur(8px)` with 500ms transition. Authors always see their own cards.
 - **A hidden card holds no words on the client.** The blur is a picture, not a lock: a reader who

@@ -20,12 +20,21 @@ import {
   fetchAdminStats,
   fetchAdminTeams,
   fetchAdminTemplates,
+  restartService,
   updateAdminTeam,
   updateAdminTemplate,
   verifyAdminToken,
 } from "../lib/api";
 
 const STORAGE_KEY = "admin_token";
+
+/** Puts the item at `from` in the place of the item at `to`. Out of range, the list stands. */
+function swap<T>(items: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= items.length) return items;
+  const next = [...items];
+  [next[from], next[to]] = [next[to], next[from]];
+  return next;
+}
 
 // --- Sub-components ---
 
@@ -153,6 +162,83 @@ function DeleteConfirmDialog({
   );
 }
 
+/**
+ * Stops the server, so that Kubernetes starts it again.
+ *
+ * The button interrupts every open board, so it says what it will do first. The reply comes back
+ * before the server goes, so "sent" means the restart started and not that it finished.
+ */
+function RestartDialog({
+  onRestart,
+  onClose,
+}: {
+  onRestart: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  async function run() {
+    setSending(true);
+    setError("");
+    try {
+      await onRestart();
+      setSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The server did not take the request");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-surface border border-border rounded-xl p-6 max-w-sm w-full mx-4 shadow-lg space-y-4">
+        <h3 className="font-display text-lg font-semibold">
+          {sent ? "The service is restarting" : "Restart the service?"}
+        </h3>
+        <p className="text-sm text-muted">
+          {sent
+            ? "The server stops and starts again. Give it a few seconds, then load this page again."
+            : "The server stops and starts again. Everyone on a board loses the connection for a few seconds, and each browser joins again by itself. The boards are in the database, so no cards are lost."}
+        </p>
+
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 text-sm border border-border py-2 rounded-lg hover:bg-canvas transition-colors"
+          >
+            {sent ? "Close" : "Cancel"}
+          </button>
+          {sent ? (
+            <button
+              onClick={() => window.location.reload()}
+              className="flex-1 text-sm bg-accent text-white py-2 rounded-lg hover:bg-accent-hover transition-colors"
+            >
+              Load again
+            </button>
+          ) : (
+            <button
+              onClick={run}
+              disabled={sending}
+              className="flex-1 text-sm bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+            >
+              {sending ? "Restarting…" : "Restart"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Template components ---
 
 /** What the template form hands back: the row, and the settings a board from it starts with. */
@@ -178,7 +264,9 @@ function TemplateForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [columns, setColumns] = useState<string[]>(initial?.columns ?? [""]);
-  const [position, setPosition] = useState(0);
+  // The place the template already holds. A form that started at 0 wrote 0 back at every edit,
+  // which moved the template to the head of the list on the home page.
+  const [position, setPosition] = useState(initial?.position ?? 0);
   const [defaultBlurred, setDefaultBlurred] = useState(initial?.default_blurred ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -249,10 +337,14 @@ function TemplateForm({
       </div>
 
       <div>
-        <label className="block text-xs text-muted mb-1">Columns</label>
+        <label className="block text-xs text-muted mb-1">
+          Columns
+          <span className="text-muted/70"> — the board reads them in this order</span>
+        </label>
         <div className="space-y-1.5">
           {columns.map((col, i) => (
-            <div key={i} className="flex gap-2">
+            <div key={i} className="flex gap-2 items-center">
+              <span className="text-[11px] text-muted w-4 text-right tabular-nums">{i + 1}</span>
               <input
                 type="text"
                 value={col}
@@ -260,10 +352,30 @@ function TemplateForm({
                 placeholder={`Column ${i + 1}`}
                 className="flex-1 rounded-lg border border-border px-3 py-1.5 text-sm bg-canvas focus:outline-none focus:ring-2 focus:ring-accent/40"
               />
+              {/* The order is what the board takes, so it is set here and nowhere else. */}
+              <button
+                type="button"
+                onClick={() => setColumns((prev) => swap(prev, i, i - 1))}
+                disabled={i === 0}
+                aria-label={`Move ${col || `column ${i + 1}`} up`}
+                className="px-1.5 text-muted hover:text-ink transition-colors disabled:opacity-25 disabled:hover:text-muted"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                onClick={() => setColumns((prev) => swap(prev, i, i + 1))}
+                disabled={i === columns.length - 1}
+                aria-label={`Move ${col || `column ${i + 1}`} down`}
+                className="px-1.5 text-muted hover:text-ink transition-colors disabled:opacity-25 disabled:hover:text-muted"
+              >
+                ↓
+              </button>
               {columns.length > 1 && (
                 <button
                   type="button"
                   onClick={() => setColumns((prev) => prev.filter((_, j) => j !== i))}
+                  aria-label={`Remove ${col || `column ${i + 1}`}`}
                   className="px-2 text-muted hover:text-ink transition-colors"
                 >
                   &times;
@@ -366,6 +478,7 @@ function ApplyTemplateDialog({
     ? [
         result.columns_renamed > 0 &&
           `${result.columns_renamed} ${result.columns_renamed === 1 ? "column" : "columns"} renamed`,
+        result.columns_moved > 0 && `${result.columns_moved} moved`,
         result.columns_added > 0 && `${result.columns_added} added`,
       ]
         .filter(Boolean)
@@ -402,8 +515,9 @@ function ApplyTemplateDialog({
               ))}
             </div>
             <p className="text-sm text-muted">
-              A name the board has no column for is added before Actions. Nothing is deleted, so
-              no cards are lost and a board keeps any column the template no longer names.
+              A column the board already has by name keeps its cards and moves to its place here.
+              The other names rename the other columns, in order. A name with no column becomes
+              one. Nothing is deleted, so no cards are lost.
             </p>
           </>
         )}
@@ -527,7 +641,7 @@ function TemplatesPanel({
                     <td className="px-4 py-2.5 text-muted whitespace-nowrap">
                       {t.default_blurred ? "hidden" : "cards shown"}
                     </td>
-                    <td className="px-4 py-2.5 text-muted">{templates.indexOf(t)}</td>
+                    <td className="px-4 py-2.5 text-muted">{t.position}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex gap-2">
                         <button
@@ -844,6 +958,7 @@ export default function Admin() {
   const [tab, setTab] = useState<"boards" | "templates" | "teams">("boards");
   const [templates, setTemplates] = useState<Template[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [restarting, setRestarting] = useState(false);
 
   const getToken = useCallback(() => {
     return sessionStorage.getItem(STORAGE_KEY) ?? "";
@@ -1013,14 +1128,29 @@ export default function Admin() {
               Admin
             </span>
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-xs text-muted hover:text-ink transition-colors"
-          >
-            Log out
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setRestarting(true)}
+              className="text-xs text-muted hover:text-ink transition-colors"
+            >
+              Restart service
+            </button>
+            <button
+              onClick={handleLogout}
+              className="text-xs text-muted hover:text-ink transition-colors"
+            >
+              Log out
+            </button>
+          </div>
         </div>
       </header>
+
+      {restarting && (
+        <RestartDialog
+          onRestart={() => restartService(getToken())}
+          onClose={() => setRestarting(false)}
+        />
+      )}
 
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Stats */}

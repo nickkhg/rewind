@@ -130,21 +130,32 @@ export default function Board() {
 
       const overData = over.data.current as { type: string; ticketId: string; columnId: string } | undefined;
       const activeData = active.data.current as { type: string; ticket: Ticket; columnId: string } | undefined;
+      if (activeData?.type !== "ticket" || !overData) return;
 
-      if (
-        overData?.type === "merge" &&
-        activeData?.type === "ticket" &&
-        activeData.ticket.id !== overData.ticketId
-      ) {
-        send({
-          type: "MergeTickets",
-          payload: {
-            source_ticket_id: activeData.ticket.id,
-            target_ticket_id: overData.ticketId,
-          },
-        });
-        setPendingUndo();
+      // Where the card is dropped answers what the drag meant. In its own column, on another
+      // card, the two become one — two people wrote the same thing. In another column, anywhere
+      // in it, the card moves there. A column full of cards leaves almost no gap to aim at, so
+      // the drop cannot ask the reader to hit one.
+      const sameColumn = overData.columnId === activeData.columnId;
+
+      if (sameColumn) {
+        if (overData.type === "merge" && activeData.ticket.id !== overData.ticketId) {
+          send({
+            type: "MergeTickets",
+            payload: {
+              source_ticket_id: activeData.ticket.id,
+              target_ticket_id: overData.ticketId,
+            },
+          });
+          setPendingUndo();
+        }
+        return;
       }
+
+      send({
+        type: "MoveTicket",
+        payload: { ticket_id: activeData.ticket.id, column_id: overData.columnId },
+      });
     },
     [send, setPendingUndo]
   );

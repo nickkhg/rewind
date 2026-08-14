@@ -25,11 +25,16 @@ export function DraggableTicket({ ticket, color, columnId, columnName, columnRol
     disabled: isBlurred,
   });
 
-  const { setNodeRef: setDropRef, isOver } = useDroppable({
+  const { setNodeRef: setDropRef, isOver, active } = useDroppable({
     id: `drop-${ticket.id}`,
     data: { type: "merge", ticketId: ticket.id, columnId },
     disabled: isBlurred,
   });
+
+  // The ring says "these two become one", which is what a drop does inside one column alone.
+  // A card from another column moves here instead, and the column says so.
+  const isMergeTarget =
+    isOver && (active?.data.current as { columnId?: string } | undefined)?.columnId === columnId;
 
   return (
     <div
@@ -47,7 +52,7 @@ export function DraggableTicket({ ticket, color, columnId, columnName, columnRol
     >
       <div
         style={{
-          boxShadow: isOver ? `0 0 0 2px ${color}` : "none",
+          boxShadow: isMergeTarget ? `0 0 0 2px ${color}` : "none",
           borderRadius: "0.5rem",
           transition: "box-shadow 150ms ease",
         }}
