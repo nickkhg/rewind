@@ -308,6 +308,28 @@ pub async fn delete_template(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// Stops the server, so that Kubernetes starts it again.
+///
+/// The pod has `restartPolicy: Always`, so the container comes back as soon as the process ends.
+/// The exit code is 0, because this stop is asked for and is not a fault. Nothing on a board is
+/// lost: the boards live in PostgreSQL, and a browser opens its socket again after two seconds.
+/// The participant list and a pending merge undo are in memory, so both go.
+///
+/// The deployment runs one replica. With more than one, this stops the pod that answers the
+/// request and no other.
+pub async fn restart_service(_auth: AdminAuth) -> Json<serde_json::Value> {
+    tracing::warn!("Admin asked for a restart. The server stops now.");
+
+    // The answer goes out first. A process that exits inside the handler writes no response, and
+    // the admin page would show a network error for a restart that worked.
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        std::process::exit(0);
+    });
+
+    Json(serde_json::json!({ "ok": true }))
+}
+
 // --- Team management ---
 
 pub async fn list_teams(

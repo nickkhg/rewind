@@ -389,6 +389,9 @@ pub struct ApplyTemplateResult {
     pub boards_changed: i64,
     pub columns_renamed: i64,
     pub columns_added: i64,
+    /// Columns that kept their name and took another place, which is how the order of a
+    /// template reaches a board.
+    pub columns_moved: i64,
     /// The boards that changed, so that the clients holding one open can be told. The admin
     /// reads the counts above and has no use for the ids.
     #[serde(skip_serializing)]
@@ -406,6 +409,9 @@ pub struct Template {
     /// where the team writes before it reads. False for a meeting that works a list together.
     /// It sets the first state of the board and nothing after it: the facilitator still decides.
     pub default_blurred: bool,
+    /// Where the template stands in the list on the home page. It goes out with the row so that
+    /// the admin form can put it back: a form that did not know it wrote 0 over it at each edit.
+    pub position: i32,
 }
 
 // --- Teams ---

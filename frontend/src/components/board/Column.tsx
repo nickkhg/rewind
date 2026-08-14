@@ -1,3 +1,4 @@
+import { useDndContext, useDroppable } from "@dnd-kit/core";
 import { useBoardStore } from "../../store/boardStore";
 import { sortTickets } from "../../utils/sort";
 import { DraggableTicket } from "./DraggableTicket";
@@ -31,8 +32,24 @@ export function Column({ column, color, send }: ColumnProps) {
 
   const voteLimitReached = voteLimit !== null && myVotesInColumn >= voteLimit;
 
+  // A card dropped anywhere in this column comes to this column, the gaps between the cards
+  // included, which is what this droppable catches.
+  const { setNodeRef } = useDroppable({
+    id: `column-${column.id}`,
+    data: { type: "column", columnId: column.id },
+  });
+
+  // The column lights up while a card from another column is over any part of it. The card
+  // droppables sit inside this one, so the column is asked about the drag rather than told.
+  const { active, over } = useDndContext();
+  const columnOf = (data: unknown) => (data as { columnId?: string } | undefined)?.columnId;
+  const isMoveTarget =
+    !!active &&
+    columnOf(over?.data.current) === column.id &&
+    columnOf(active.data.current) !== column.id;
+
   return (
-    <div className="flex-1 min-w-[280px] max-w-[400px] flex flex-col min-h-0">
+    <div ref={setNodeRef} className="flex-1 min-w-[280px] max-w-[400px] flex flex-col min-h-0">
       <div className="flex items-center gap-2 mb-3">
         <div
           className="w-3 h-3 rounded-full shrink-0"
@@ -49,7 +66,14 @@ export function Column({ column, color, send }: ColumnProps) {
 
       <AddTicketForm columnId={column.id} send={send} />
 
-      <div className="space-y-2.5 overflow-y-auto min-h-0 flex-1">
+      <div
+        className="space-y-2.5 overflow-y-auto min-h-0 flex-1 rounded-lg transition-colors"
+        style={
+          isMoveTarget
+            ? { boxShadow: `inset 0 0 0 2px ${color}`, backgroundColor: `${color}14` }
+            : undefined
+        }
+      >
         {isArchive && column.tickets.length === 0 && (
           <p className="text-xs text-muted leading-relaxed border border-dashed border-border rounded-lg px-3 py-4">
             Nothing carried over yet. The facilitator can copy cards from an earlier board in

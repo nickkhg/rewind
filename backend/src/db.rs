@@ -379,7 +379,7 @@ pub async fn get_boards_by_facilitator_id(
 
 pub async fn list_templates(pool: &PgPool) -> Result<Vec<crate::models::Template>, sqlx::Error> {
     let rows = sqlx::query_as::<_, TemplateRow>(
-        "SELECT id, name, description, columns, default_blurred FROM templates ORDER BY position",
+        "SELECT id, name, description, columns, default_blurred, position FROM templates ORDER BY position",
     )
     .fetch_all(pool)
     .await?;
@@ -394,7 +394,7 @@ pub async fn get_template(
     template_id: &str,
 ) -> Result<Option<crate::models::Template>, sqlx::Error> {
     let row = sqlx::query_as::<_, TemplateRow>(
-        "SELECT id, name, description, columns, default_blurred FROM templates WHERE id = $1",
+        "SELECT id, name, description, columns, default_blurred, position FROM templates WHERE id = $1",
     )
     .bind(template_id)
     .fetch_optional(pool)
@@ -410,6 +410,7 @@ fn template_from_row(r: TemplateRow) -> crate::models::Template {
         description: r.description,
         columns: r.columns,
         default_blurred: r.default_blurred,
+        position: r.position,
     }
 }
 
@@ -464,11 +465,22 @@ pub async fn update_template(
 /// A board is a copy of its template and not a view of it, so a rename in the template reaches
 /// nothing by itself. This is the one place that changes a board that already exists.
 ///
-/// The names go by position over the columns that are neither Previous Actions nor Actions: the
-/// first name of the template renames the first such column, and so on. A name the board has no
-/// column for is added, and Actions stays last. Nothing is ever deleted, so no card is lost by
-/// an apply: a board with more columns than the template keeps the extra ones, and a board whose
-/// facilitator renamed a column by hand takes the name of the template back.
+/// The template names take their columns in two passes over the columns that are neither
+/// Previous Actions nor Actions:
+///
+/// 1. **By name.** A name that the board already has takes that column, whatever place it holds.
+///    This is what carries an order across: a template that puts IDS before Rocks moves the two
+///    columns of the board, and the cards go with them.
+/// 2. **By position.** The names that matched nothing take the columns that matched nothing, in
+///    the order both are in. This is what carries a rename across: "Segue" becomes "Solved" and
+///    keeps its cards.
+///
+/// A name that is left over is added as a new column. Nothing is ever deleted, so no card is lost
+/// by an apply: a column the template no longer names keeps its cards and stands after the
+/// columns the template does name. Actions stays last.
+///
+/// The two passes matter in that order. Name first, position second, is what stops a reordered
+/// template from renaming the columns under the cards of a board.
 pub async fn apply_template_to_boards(
     pool: &PgPool,
     template_id: &str,
@@ -517,73 +529,101 @@ pub async fn apply_template_to_boards(
             .collect();
 
         let mut rocks_taken = body.iter().any(|c| c.role.as_deref() == Some(ROLE_ROCKS));
-        let mut added: Vec<String> = Vec::new();
         let mut renamed = 0i64;
+        let mut added = 0i64;
 
-        for (i, name) in names.iter().enumerate() {
-            match body.get(i) {
-                // The board already reads this way.
-                Some(column) if column.name == *name => {}
-                Some(column) => {
-                    sqlx::query("UPDATE columns SET name = $1 WHERE id = $2")
-                        .bind(name)
-                        .bind(&column.id)
-                        .execute(&mut *tx)
-                        .await?;
-                    renamed += 1;
-                }
-                None => {
-                    // A column the board never had. On a Level 10 board the Rocks column takes
-                    // its role here as it would at creation, so that a card in it can carry a
-                    // rock status. One column of each role to a board, as ever.
-                    let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks"
-                    {
-                        rocks_taken = true;
-                        Some(ROLE_ROCKS)
-                    } else {
-                        None
-                    };
-                    let id = nanoid!(8);
-                    sqlx::query(
-                        "INSERT INTO columns (id, board_id, name, position, role) \
-                         VALUES ($1, $2, $3, $4, $5)",
-                    )
-                    .bind(&id)
-                    .bind(&board.id)
-                    .bind(name)
-                    .bind(0i32)
-                    .bind(role)
-                    .execute(&mut *tx)
-                    .await?;
-                    added.push(id);
-                }
+        // One slot for each name of the template, in the order the template holds them. A slot
+        // holds the id of the column that takes the name.
+        let mut slots: Vec<Option<String>> = vec![None; names.len()];
+        // A column the board holds and no name has claimed yet.
+        let mut free: Vec<&&ColumnRow> = body.iter().collect();
+
+        // Pass one: a name that the board already has keeps its own column, wherever it stands.
+        for (slot, name) in slots.iter_mut().zip(names.iter()) {
+            let wanted = name.trim().to_lowercase();
+            if let Some(at) = free
+                .iter()
+                .position(|c| c.name.trim().to_lowercase() == wanted)
+            {
+                *slot = Some(free.remove(at).id.clone());
             }
         }
 
-        if renamed == 0 && added.is_empty() {
+        // Pass two: what is left of the names takes what is left of the columns, in order. Any
+        // name still without a column becomes one.
+        for (slot, name) in slots.iter_mut().zip(names.iter()) {
+            if slot.is_some() {
+                continue;
+            }
+            if !free.is_empty() {
+                let column = free.remove(0);
+                sqlx::query("UPDATE columns SET name = $1 WHERE id = $2")
+                    .bind(name)
+                    .bind(&column.id)
+                    .execute(&mut *tx)
+                    .await?;
+                renamed += 1;
+                *slot = Some(column.id.clone());
+                continue;
+            }
+
+            // A column the board never had. On a Level 10 board the Rocks column takes its role
+            // here as it would at creation, so that a card in it can carry a rock status. One
+            // column of each role to a board, as ever.
+            let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks" {
+                rocks_taken = true;
+                Some(ROLE_ROCKS)
+            } else {
+                None
+            };
+            let id = nanoid!(8);
+            sqlx::query(
+                "INSERT INTO columns (id, board_id, name, position, role) \
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(&id)
+            .bind(&board.id)
+            .bind(name)
+            .bind(0i32)
+            .bind(role)
+            .execute(&mut *tx)
+            .await?;
+            added += 1;
+            *slot = Some(id);
+        }
+
+        // The board reads: the record, the columns the template names in its own order, the
+        // columns it no longer names, the output.
+        let order: Vec<&str> = head
+            .iter()
+            .map(|c| c.id.as_str())
+            .chain(slots.iter().filter_map(|slot| slot.as_deref()))
+            .chain(free.iter().map(|c| c.id.as_str()))
+            .chain(tail.iter().map(|c| c.id.as_str()))
+            .collect();
+
+        let moved = order
+            .iter()
+            .zip(columns.iter())
+            .filter(|(id, was)| **id != was.id.as_str())
+            .count() as i64;
+
+        if renamed == 0 && added == 0 && moved == 0 {
             continue;
         }
 
-        // Every column takes its place again, so that a new one lands before Actions and the
-        // board reads in the order a board made today does.
-        let order: Vec<&String> = head
-            .iter()
-            .map(|c| &c.id)
-            .chain(body.iter().map(|c| &c.id))
-            .chain(added.iter())
-            .chain(tail.iter().map(|c| &c.id))
-            .collect();
         for (position, id) in order.iter().enumerate() {
             sqlx::query("UPDATE columns SET position = $1 WHERE id = $2")
                 .bind(position as i32)
-                .bind(*id)
+                .bind(id)
                 .execute(&mut *tx)
                 .await?;
         }
 
         result.boards_changed += 1;
         result.columns_renamed += renamed;
-        result.columns_added += added.len() as i64;
+        result.columns_added += added;
+        result.columns_moved += moved;
         result.changed_board_ids.push(board.id.clone());
     }
 
@@ -668,18 +708,42 @@ pub async fn edit_ticket(
 }
 
 /// Puts a card into a different column of the same board. The votes stay with the card.
+/// Moves a card to another column of the same board.
+///
+/// A mark belongs to the column the card sits in: a done mark to an action column, a rock status
+/// to the Rocks column. The server refuses to set either one anywhere else, so a card that leaves
+/// such a column leaves the mark behind rather than carrying a mark nothing can clear.
 pub async fn move_ticket(
     pool: &PgPool,
     ticket_id: &str,
     column_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE tickets SET column_id = $1 WHERE id = $2")
+    let role = sqlx::query_as::<_, ColumnIdRoleRow>("SELECT id, role FROM columns WHERE id = $1")
         .bind(column_id)
-        .bind(ticket_id)
-        .execute(pool)
-        .await?;
+        .fetch_optional(pool)
+        .await?
+        .and_then(|c| c.role);
+
+    let keeps_done = role
+        .as_deref()
+        .is_some_and(|role| DONE_COLUMN_ROLES.contains(&role));
+    let keeps_rock = role.as_deref() == Some(ROLE_ROCKS);
+
+    sqlx::query(
+        "UPDATE tickets SET column_id = $1, \
+         done_at = CASE WHEN $3 THEN done_at ELSE NULL END, \
+         rock_status = CASE WHEN $4 THEN rock_status ELSE NULL END \
+         WHERE id = $2",
+    )
+    .bind(column_id)
+    .bind(ticket_id)
+    .bind(keeps_done)
+    .bind(keeps_rock)
+    .execute(pool)
+    .await?;
     Ok(())
 }
+
 
 pub async fn get_ticket_author(
     pool: &PgPool,
@@ -2278,6 +2342,7 @@ struct TemplateRow {
     description: String,
     columns: Vec<String>,
     default_blurred: bool,
+    position: i32,
 }
 
 #[derive(sqlx::FromRow)]

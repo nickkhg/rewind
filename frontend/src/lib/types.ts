@@ -210,6 +210,8 @@ export interface ApplyTemplateResult {
   boards_changed: number;
   columns_renamed: number;
   columns_added: number;
+  /** Columns that kept their name and took another place, which is how an order reaches a board. */
+  columns_moved: number;
 }
 
 export interface LabelCount {
@@ -305,6 +307,8 @@ export interface Template {
    * first state of the board only — the facilitator still decides from there.
    */
   default_blurred: boolean;
+  /** Where the template stands in the list on the home page. */
+  position: number;
 }
 
 export type SortMode = "newest" | "most-votes";

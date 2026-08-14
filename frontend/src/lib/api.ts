@@ -220,6 +220,18 @@ export async function fetchAdminStats(token: string): Promise<GlobalStats> {
   return res.json();
 }
 
+/**
+ * Stops the server, so that Kubernetes starts it again. The answer comes back before the server
+ * goes, so a reply here means the restart started and not that it finished.
+ */
+export async function restartService(token: string): Promise<void> {
+  const res = await fetch(`${getServerUrl()}/api/admin/restart`, {
+    method: "POST",
+    headers: adminHeaders(token),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 export async function fetchAdminBoards(token: string): Promise<AdminBoardSummary[]> {
   const res = await fetch(`${getServerUrl()}/api/admin/boards`, {
     headers: adminHeaders(token),
