@@ -163,7 +163,7 @@ export function FacilitatorMenu({ send }: FacilitatorMenuProps) {
 
                   <hr className="border-border" />
 
-                  {/* Actions of an earlier retro */}
+                  {/* Cards of an earlier board */}
                   <CarryActionsPanel boardId={boardId} />
 
                   {/* The lock on the board belongs to whoever called the meeting */}

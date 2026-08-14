@@ -4,9 +4,9 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 
 use crate::models::{
-    ActionSourceBoard, Board, Column, Comment, EditorRequestView, EditorView, Gif, ImportResult,
-    LabelCount, MeetingRatingView, ScorecardMetric, Ticket, DONE_COLUMN_ROLES, ROLE_ACTIONS,
-    ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS, TEMPLATE_LEVEL10,
+    ActionSourceBoard, ApplyTemplateResult, Board, Column, Comment, EditorRequestView, EditorView,
+    Gif, ImportResult, LabelCount, MeetingRatingView, ScorecardMetric, Ticket, DONE_COLUMN_ROLES,
+    ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS, TEMPLATE_LEVEL10,
 };
 use crate::state::MergeSnapshot;
 
@@ -457,6 +457,139 @@ pub async fn update_template(
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// Brings the columns of a template across to the boards already made from it.
+///
+/// A board is a copy of its template and not a view of it, so a rename in the template reaches
+/// nothing by itself. This is the one place that changes a board that already exists.
+///
+/// The names go by position over the columns that are neither Previous Actions nor Actions: the
+/// first name of the template renames the first such column, and so on. A name the board has no
+/// column for is added, and Actions stays last. Nothing is ever deleted, so no card is lost by
+/// an apply: a board with more columns than the template keeps the extra ones, and a board whose
+/// facilitator renamed a column by hand takes the name of the template back.
+pub async fn apply_template_to_boards(
+    pool: &PgPool,
+    template_id: &str,
+    names: &[String],
+) -> Result<ApplyTemplateResult, sqlx::Error> {
+    let is_level10 = template_id == TEMPLATE_LEVEL10;
+
+    let boards = sqlx::query_as::<_, BoardIdRow>(
+        "SELECT id FROM boards WHERE template_id = $1 ORDER BY created_at",
+    )
+    .bind(template_id)
+    .fetch_all(pool)
+    .await?;
+
+    let mut result = ApplyTemplateResult {
+        boards_examined: boards.len() as i64,
+        ..Default::default()
+    };
+
+    let mut tx = pool.begin().await?;
+
+    for board in &boards {
+        let columns = sqlx::query_as::<_, ColumnRow>(
+            "SELECT id, name, position, role FROM columns WHERE board_id = $1 ORDER BY position",
+        )
+        .bind(&board.id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        let head: Vec<&ColumnRow> = columns
+            .iter()
+            .filter(|c| c.role.as_deref() == Some(ROLE_PREVIOUS_ACTIONS))
+            .collect();
+        let tail: Vec<&ColumnRow> = columns
+            .iter()
+            .filter(|c| c.role.as_deref() == Some(ROLE_ACTIONS))
+            .collect();
+        let body: Vec<&ColumnRow> = columns
+            .iter()
+            .filter(|c| {
+                !matches!(
+                    c.role.as_deref(),
+                    Some(ROLE_PREVIOUS_ACTIONS) | Some(ROLE_ACTIONS)
+                )
+            })
+            .collect();
+
+        let mut rocks_taken = body.iter().any(|c| c.role.as_deref() == Some(ROLE_ROCKS));
+        let mut added: Vec<String> = Vec::new();
+        let mut renamed = 0i64;
+
+        for (i, name) in names.iter().enumerate() {
+            match body.get(i) {
+                // The board already reads this way.
+                Some(column) if column.name == *name => {}
+                Some(column) => {
+                    sqlx::query("UPDATE columns SET name = $1 WHERE id = $2")
+                        .bind(name)
+                        .bind(&column.id)
+                        .execute(&mut *tx)
+                        .await?;
+                    renamed += 1;
+                }
+                None => {
+                    // A column the board never had. On a Level 10 board the Rocks column takes
+                    // its role here as it would at creation, so that a card in it can carry a
+                    // rock status. One column of each role to a board, as ever.
+                    let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks"
+                    {
+                        rocks_taken = true;
+                        Some(ROLE_ROCKS)
+                    } else {
+                        None
+                    };
+                    let id = nanoid!(8);
+                    sqlx::query(
+                        "INSERT INTO columns (id, board_id, name, position, role) \
+                         VALUES ($1, $2, $3, $4, $5)",
+                    )
+                    .bind(&id)
+                    .bind(&board.id)
+                    .bind(name)
+                    .bind(0i32)
+                    .bind(role)
+                    .execute(&mut *tx)
+                    .await?;
+                    added.push(id);
+                }
+            }
+        }
+
+        if renamed == 0 && added.is_empty() {
+            continue;
+        }
+
+        // Every column takes its place again, so that a new one lands before Actions and the
+        // board reads in the order a board made today does.
+        let order: Vec<&String> = head
+            .iter()
+            .map(|c| &c.id)
+            .chain(body.iter().map(|c| &c.id))
+            .chain(added.iter())
+            .chain(tail.iter().map(|c| &c.id))
+            .collect();
+        for (position, id) in order.iter().enumerate() {
+            sqlx::query("UPDATE columns SET position = $1 WHERE id = $2")
+                .bind(position as i32)
+                .bind(*id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        result.boards_changed += 1;
+        result.columns_renamed += renamed;
+        result.columns_added += added.len() as i64;
+        result.changed_board_ids.push(board.id.clone());
+    }
+
+    tx.commit().await?;
+
+    Ok(result)
 }
 
 pub async fn delete_template(pool: &PgPool, id: &str) -> Result<bool, sqlx::Error> {
@@ -1409,6 +1542,8 @@ pub async fn list_action_sources(
             b.created_at,
             (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id
               WHERE c.board_id = b.id AND c.role = 'actions') AS action_count,
+            (SELECT COUNT(*) FROM tickets t JOIN columns c ON t.column_id = c.id
+              WHERE c.board_id = b.id) AS card_count,
             COALESCE((SELECT array_agg(l.label ORDER BY l.label) FROM board_labels l WHERE l.board_id = b.id), '{}'::text[]) AS labels,
             -- A locked board is named here but not opened here. The copy asks for its password.
             b.password_hash IS NOT NULL AS is_locked
@@ -1417,8 +1552,10 @@ pub async fn list_action_sources(
           AND ($2 = '' OR b.title ILIKE '%' || $2 || '%')
           AND (cardinality($3::text[]) = 0
                OR EXISTS (SELECT 1 FROM board_labels l WHERE l.board_id = b.id AND l.label = ANY($3)))
+          -- Any card will do, in any column: the items of a discussion carry over as an action
+          -- does, so a board with none of the second can still supply the first.
           AND EXISTS (SELECT 1 FROM tickets t JOIN columns c ON t.column_id = c.id
-                       WHERE c.board_id = b.id AND c.role = 'actions')
+                       WHERE c.board_id = b.id)
         ORDER BY b.created_at DESC
         LIMIT $4
         "#,
@@ -1437,35 +1574,73 @@ pub async fn list_action_sources(
             title: r.title,
             created_at: r.created_at,
             action_count: r.action_count,
+            card_count: r.card_count,
             labels: r.labels,
             is_locked: r.is_locked,
         })
         .collect())
 }
 
-/// Copies the action cards of the source board into the Previous Actions column of the target
-/// board. A card whose text is already there is skipped, so a second copy adds nothing. Votes do
-/// not move. Returns `None` when a board or one of the two columns does not exist.
-pub async fn copy_actions(
+/// What a copy could not find. The caller turns each one into its own message, because "that
+/// column is gone" and "that board is gone" send the reader to different places.
+pub enum CopyOutcome {
+    Copied(ImportResult),
+    NoSourceColumn,
+    NoTargetColumn,
+}
+
+/// Copies cards from a column of the source board into a column of the target board.
+///
+/// Naming no column keeps the old carry-over: the Actions of the source land in Previous Actions
+/// here. Naming one takes any column to any other — the items a team did not close in its last
+/// meeting come to the same column of this one.
+///
+/// A card whose text is already in the target column is skipped, so a second copy adds nothing.
+/// Votes do not move, and neither does a rock status: a card arrives unmarked. A done mark comes
+/// across only into an action column, which is the only place the mark means anything.
+pub async fn copy_cards(
     pool: &PgPool,
     source_board_id: &str,
+    source_column_id: Option<&str>,
     target_board_id: &str,
-) -> Result<Option<ImportResult>, sqlx::Error> {
+    target_column_id: Option<&str>,
+) -> Result<CopyOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    let source_column = sqlx::query_as::<_, ColumnIdRow>(
-        "SELECT id FROM columns WHERE board_id = $1 AND role = $2",
-    )
-    .bind(source_board_id)
-    .bind(ROLE_ACTIONS)
+    // A column the caller names is taken only when it sits on the board the caller named. The
+    // board is what the password and the editor list are checked against, so a column id from
+    // another board would walk straight past both.
+    let source_column = match source_column_id {
+        Some(id) => {
+            sqlx::query_as::<_, ColumnIdRoleRow>(
+                "SELECT id, role FROM columns WHERE id = $1 AND board_id = $2",
+            )
+            .bind(id)
+            .bind(source_board_id)
+        }
+        None => sqlx::query_as::<_, ColumnIdRoleRow>(
+            "SELECT id, role FROM columns WHERE board_id = $1 AND role = $2",
+        )
+        .bind(source_board_id)
+        .bind(ROLE_ACTIONS),
+    }
     .fetch_optional(&mut *tx)
     .await?;
 
-    let target_column = sqlx::query_as::<_, ColumnIdRow>(
-        "SELECT id FROM columns WHERE board_id = $1 AND role = $2",
-    )
-    .bind(target_board_id)
-    .bind(ROLE_PREVIOUS_ACTIONS)
+    let target_column = match target_column_id {
+        Some(id) => {
+            sqlx::query_as::<_, ColumnIdRoleRow>(
+                "SELECT id, role FROM columns WHERE id = $1 AND board_id = $2",
+            )
+            .bind(id)
+            .bind(target_board_id)
+        }
+        None => sqlx::query_as::<_, ColumnIdRoleRow>(
+            "SELECT id, role FROM columns WHERE board_id = $1 AND role = $2",
+        )
+        .bind(target_board_id)
+        .bind(ROLE_PREVIOUS_ACTIONS),
+    }
     .fetch_optional(&mut *tx)
     .await?;
 
@@ -1474,11 +1649,19 @@ pub async fn copy_actions(
         .fetch_optional(&mut *tx)
         .await?;
 
-    let (Some(source_column), Some(target_column), Some(source_title)) =
-        (source_column, target_column, source_title)
-    else {
-        return Ok(None);
+    let (Some(source_column), Some(source_title)) = (source_column, source_title) else {
+        return Ok(CopyOutcome::NoSourceColumn);
     };
+    let Some(target_column) = target_column else {
+        return Ok(CopyOutcome::NoTargetColumn);
+    };
+
+    // A done mark belongs to an action and to nothing else: the server refuses to set one on a
+    // card in a free-text column, so the copy must not write one in by the back door.
+    let target_keeps_done = target_column
+        .role
+        .as_deref()
+        .is_some_and(|role| DONE_COLUMN_ROLES.contains(&role));
 
     let target_anonymous = sqlx::query_as::<_, AnonymousRow>(
         "SELECT is_anonymous FROM boards WHERE id = $1",
@@ -1514,7 +1697,7 @@ pub async fn copy_actions(
             continue;
         }
 
-        // The GIF comes across with the action, so the record of the last retro reads the same way.
+        // The GIF comes across with the card, so the record of the last meeting reads the same way.
         let gif = ticket.take_gif();
         let author_name = if target_anonymous {
             String::new()
@@ -1522,8 +1705,9 @@ pub async fn copy_actions(
             ticket.author_name
         };
 
-        // A done action comes across done. Previous Actions is the record of the last retro, and
-        // the record has to say which of the actions the team closed.
+        // A done action comes across done, because Previous Actions is the record of the last
+        // retro and the record has to say which of the actions the team closed. A card that
+        // lands anywhere else arrives open: no column but the two action ones holds the mark.
         let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(gif.as_ref());
         sqlx::query(
             "INSERT INTO tickets (id, column_id, content, author_id, author_name, created_at, \
@@ -1545,7 +1729,7 @@ pub async fn copy_actions(
         .bind(gw)
         .bind(gh)
         .bind(gtitle)
-        .bind(ticket.done_at)
+        .bind(if target_keeps_done { ticket.done_at } else { None })
         .execute(&mut *tx)
         .await?;
 
@@ -1554,7 +1738,7 @@ pub async fn copy_actions(
 
     tx.commit().await?;
 
-    Ok(Some(ImportResult { imported, skipped }))
+    Ok(CopyOutcome::Copied(ImportResult { imported, skipped }))
 }
 
 // --- Labels ---
@@ -1889,6 +2073,19 @@ struct ColumnRow {
 }
 
 #[derive(sqlx::FromRow)]
+struct BoardIdRow {
+    id: String,
+}
+
+/// A column and what it is for. The role decides whether a card copied into it keeps its
+/// done mark.
+#[derive(sqlx::FromRow)]
+struct ColumnIdRoleRow {
+    id: String,
+    role: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
 struct TicketRow {
     id: String,
     column_id: String,
@@ -2048,6 +2245,7 @@ struct ActionSourceRow {
     title: String,
     created_at: DateTime<Utc>,
     action_count: i64,
+    card_count: i64,
     labels: Vec<String>,
     is_locked: bool,
 }
@@ -2061,11 +2259,6 @@ struct LabelRow {
 #[derive(sqlx::FromRow)]
 struct LabelNameRow {
     label: String,
-}
-
-#[derive(sqlx::FromRow)]
-struct ColumnIdRow {
-    id: String,
 }
 
 #[derive(sqlx::FromRow)]

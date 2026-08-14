@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Logo } from "../components/layout/Logo";
-import type { AdminBoardDetail, AdminBoardSummary, GlobalStats, Team, Template } from "../lib/types";
+import type {
+  AdminBoardDetail,
+  AdminBoardSummary,
+  ApplyTemplateResult,
+  GlobalStats,
+  Team,
+  Template,
+} from "../lib/types";
 import {
+  applyAdminTemplate,
   createAdminTemplate,
   createAdminTeam,
   deleteAdminBoard,
@@ -264,15 +272,14 @@ function TemplateForm({
             </div>
           ))}
         </div>
-        {columns.length < 5 && (
-          <button
-            type="button"
-            onClick={() => setColumns((prev) => [...prev, ""])}
-            className="mt-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
-          >
-            + Add column
-          </button>
-        )}
+        {/* A template names as many columns as the meeting needs. The board scrolls sideways. */}
+        <button
+          type="button"
+          onClick={() => setColumns((prev) => [...prev, ""])}
+          className="mt-1.5 text-xs text-accent hover:text-accent-hover transition-colors"
+        >
+          + Add column
+        </button>
       </div>
 
       <div>
@@ -323,6 +330,112 @@ function TemplateForm({
   );
 }
 
+/**
+ * Brings the columns of a template across to the boards already made from it.
+ *
+ * A board is a copy of its template and never reads the template again, so a rename here reaches
+ * nothing by itself. This is the one control that changes a board that already exists, which is
+ * why it says what it will do before it does it.
+ */
+function ApplyTemplateDialog({
+  template,
+  onApply,
+  onClose,
+}: {
+  template: Template;
+  onApply: () => Promise<ApplyTemplateResult>;
+  onClose: () => void;
+}) {
+  const [applying, setApplying] = useState(false);
+  const [result, setResult] = useState<ApplyTemplateResult | null>(null);
+  const [error, setError] = useState("");
+
+  async function run() {
+    setApplying(true);
+    setError("");
+    try {
+      setResult(await onApply());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The columns did not go across");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  const changes = result
+    ? [
+        result.columns_renamed > 0 &&
+          `${result.columns_renamed} ${result.columns_renamed === 1 ? "column" : "columns"} renamed`,
+        result.columns_added > 0 && `${result.columns_added} added`,
+      ]
+        .filter(Boolean)
+        .join(", ")
+    : "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-surface border border-border rounded-xl p-6 max-w-md w-full mx-4 shadow-lg space-y-4">
+        <h3 className="font-display text-lg font-semibold">
+          {result ? "Columns applied" : "Apply columns to boards?"}
+        </h3>
+
+        {result ? (
+          <p className="text-sm text-muted">
+            {result.boards_changed === 0
+              ? `Every board from ${template.name} already reads this way. ${result.boards_examined} checked, none changed.`
+              : `${result.boards_changed} of ${result.boards_examined} boards updated: ${changes}.`}
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-muted">
+              Every board made from <strong className="text-ink">{template.name}</strong> takes
+              these names, in this order:
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {template.columns.map((col, i) => (
+                <span
+                  key={i}
+                  className="text-xs bg-canvas border border-border rounded px-1.5 py-0.5"
+                >
+                  {col}
+                </span>
+              ))}
+            </div>
+            <p className="text-sm text-muted">
+              A name the board has no column for is added before Actions. Nothing is deleted, so
+              no cards are lost and a board keeps any column the template no longer names.
+            </p>
+          </>
+        )}
+
+        {error && (
+          <p role="alert" className="text-sm text-red-600">
+            {error}
+          </p>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 text-sm border border-border py-2 rounded-lg hover:bg-canvas transition-colors"
+          >
+            {result ? "Close" : "Cancel"}
+          </button>
+          {!result && (
+            <button
+              onClick={run}
+              disabled={applying}
+              className="flex-1 text-sm bg-accent text-white py-2 rounded-lg hover:bg-accent-hover transition-colors disabled:opacity-50"
+            >
+              {applying ? "Applying…" : "Apply"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TemplatesPanel({
   templates,
   onReload,
@@ -335,6 +448,7 @@ function TemplatesPanel({
   const [editing, setEditing] = useState<Template | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Template | null>(null);
+  const [applyTarget, setApplyTarget] = useState<Template | null>(null);
 
   async function handleCreate(data: TemplateFormData) {
     await createAdminTemplate(getToken(), data);
@@ -423,6 +537,12 @@ function TemplatesPanel({
                           Edit
                         </button>
                         <button
+                          onClick={() => setApplyTarget(t)}
+                          className="text-xs text-accent hover:text-accent-hover transition-colors whitespace-nowrap"
+                        >
+                          Apply to boards
+                        </button>
+                        <button
                           onClick={() => setDeleteTarget(t)}
                           className="text-xs text-red-500 hover:text-red-700 transition-colors"
                         >
@@ -450,6 +570,14 @@ function TemplatesPanel({
           initial={editing}
           onSave={handleUpdate}
           onCancel={() => setEditing(null)}
+        />
+      )}
+
+      {applyTarget && (
+        <ApplyTemplateDialog
+          template={applyTarget}
+          onApply={() => applyAdminTemplate(getToken(), applyTarget.id)}
+          onClose={() => setApplyTarget(null)}
         />
       )}
 

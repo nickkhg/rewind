@@ -353,13 +353,16 @@ pub struct MyBoardSummary {
     pub labels: Vec<String>,
 }
 
-/// A board that can supply actions to another board.
+/// A board that can supply cards to another board.
 #[derive(Debug, Clone, Serialize)]
 pub struct ActionSourceBoard {
     pub id: String,
     pub title: String,
     pub created_at: DateTime<Utc>,
     pub action_count: i64,
+    /// Every card on the board, in every column. A board with no action can still supply the
+    /// items of a discussion column, so the list names it as well.
+    pub card_count: i64,
     pub labels: Vec<String>,
     /// True when the board asks for a password. The copy then asks for it as well, unless the
     /// caller can open that board already.
@@ -377,6 +380,19 @@ pub struct LabelCount {
 pub struct ImportResult {
     pub imported: usize,
     pub skipped: usize,
+}
+
+/// What an apply run did to the boards already made from a template.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ApplyTemplateResult {
+    pub boards_examined: i64,
+    pub boards_changed: i64,
+    pub columns_renamed: i64,
+    pub columns_added: i64,
+    /// The boards that changed, so that the clients holding one open can be told. The admin
+    /// reads the counts above and has no use for the ids.
+    #[serde(skip_serializing)]
+    pub changed_board_ids: Vec<String>,
 }
 
 /// A format a board can start from, and the settings it starts with.

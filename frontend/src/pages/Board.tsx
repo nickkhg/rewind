@@ -259,6 +259,9 @@ export default function Board() {
                   send={send}
                 />
               ))}
+              {/* A board of many columns runs past the right edge. This holds the gutter open
+                  at the end of the scroll, which the padding of the page cannot reach. */}
+              <div aria-hidden className="shrink-0 w-4" />
             </div>
           </div>
         </main>

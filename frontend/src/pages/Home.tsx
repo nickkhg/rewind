@@ -89,8 +89,10 @@ export default function Home() {
     setColumns((prev) => prev.map((c, i) => (i === index ? value : c)));
   }
 
+  // A board takes as many columns as the team writes down. Past the width of the window the
+  // board scrolls sideways, which is the only thing a long board costs.
   function addColumn() {
-    if (columns.length < 5) setColumns((prev) => [...prev, ""]);
+    setColumns((prev) => [...prev, ""]);
   }
 
   function removeColumn(index: number) {
@@ -293,15 +295,13 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
-                {columns.length < 5 && (
-                  <button
-                    type="button"
-                    onClick={addColumn}
-                    className="mt-2 text-sm text-accent hover:text-accent-hover transition-colors"
-                  >
-                    + Add column
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={addColumn}
+                  className="mt-2 text-sm text-accent hover:text-accent-hover transition-colors"
+                >
+                  + Add column
+                </button>
               </div>
             )}
 

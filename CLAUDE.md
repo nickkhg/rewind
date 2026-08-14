@@ -25,7 +25,7 @@ cargo check --workspace
 
 Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri/` (Tauri v2 desktop wrapper). Cargo workspace at root, pnpm workspace for frontend.
 
-**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the actions carry-over, and the board password. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
+**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the carry-over, and the board password. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
 
 **Backend state:** `AppState` holds a `PgPool` for database access and a parallel map of `tokio::sync::broadcast` channels (capacity 64) for WebSocket fan-out plus in-memory participant tracking.
 
@@ -44,17 +44,30 @@ Server → Client: `BoardState` (after every mutation), `Authenticated` (after J
 
 `AddTicket`, `EditTicket`, `AddComment` and `EditComment` each carry an optional `gif`. The client sends the whole state it wants, so an edit that leaves `gif` out takes the picture off the card.
 
-## Column Roles and Actions Carry-Over
+## Column Roles and the Carry-Over
 
 Every board has two columns with a `role` in the `columns` table: `previous_actions` (first) and `actions` (last). A unique partial index keeps one column of each role per board. All other columns have `role = NULL` and keep their free-text names. Templates must not supply an action column — `create_board` drops a requested column that uses one of `RESERVED_COLUMN_NAMES` (`models.rs`).
 
 A third role, `rocks`, belongs to Level 10 boards alone. Only the `level10` creation path assigns it: the first requested column whose trimmed name reads "rocks", in any case, takes `ROLE_ROCKS`. The name stays free text everywhere else — `RESERVED_COLUMN_NAMES` does not hold "rocks", so the Rocks column of the Sailboat template keeps `role = NULL` and carries no rock status.
 
-The facilitator or an editor copies the actions of any other board into Previous Actions:
+The facilitator or an editor copies cards from any column of any other board into any column of
+this one. The actions of a retro go to Previous Actions, as they always did; the items a Level 10
+team did not close come back to the same column of the next meeting.
 
-- `GET /api/boards/{id}/action-sources?q=&labels=` lists the boards that hold at least one action card, newest first. `labels` is comma-separated and matches any.
-- `POST /api/boards/{id}/actions/import` with `{ source_board_id, facilitator_token?, participant_id? }` copies them. `db::copy_actions` skips a card whose text is already there, so a second copy adds nothing. Votes do not move. The new cards keep `carried_from_board_id` and `carried_from_board_title`, which the card shows as its source.
+- `GET /api/boards/{id}/action-sources?q=&labels=` lists the boards that hold at least one card, in any column, newest first. `labels` is comma-separated and matches any. The row carries `action_count` and `card_count`.
+- `POST /api/boards/{id}/actions/import` with `{ source_board_id, source_column_id?, target_column_id?, facilitator_token?, participant_id? }` copies them. Naming no column keeps the old behaviour: Actions there into Previous Actions here. A column id is read only when it sits on the board named beside it, because the board is what the password and the editor list are checked against. `db::copy_cards` skips a card whose text is already in the target column, so a second copy adds nothing. Votes and rock status do not move. A done mark comes across only into a column whose role is one of `DONE_COLUMN_ROLES`, so a closed action carried into a free-text column arrives open. The new cards keep `carried_from_board_id` and `carried_from_board_title`, which the card shows as its source — and which also keeps them out of the blur, as a carried action has always been.
 - `PUT /api/boards/{id}/labels` and `GET /api/labels` manage the board labels. Labels are free text, kept lower case, six per board at most (`normalize_labels` in `models.rs`).
+
+**A board is a copy of its template, not a view of it.** `create_board` reads the column names
+once and writes rows to `columns`; from then on the template can be renamed, re-columned or
+deleted and the board never notices. `POST /api/admin/templates/{id}/apply` is the one route that
+reaches back: it renames by position over the columns that are neither Previous Actions nor
+Actions, adds a name the board has no column for, and renumbers so that Actions stays last. It
+deletes nothing, so no card is ever lost by an apply and a board keeps a column the template no
+longer names. A name that would be added as "rocks" on a Level 10 board takes `ROLE_ROCKS`, as it
+would at creation. Each changed board is rebroadcast, because a board open in someone's browser
+holds the old names until it is told otherwise. The admin reads the counts back:
+`{ boards_examined, boards_changed, columns_renamed, columns_added }`.
 
 REST carries these three, not the WebSocket protocol, because each one answers the caller with a result or an error. `db::is_board_privileged` applies the same rule as the WebSocket handler: facilitator token, facilitator cookie, or a place in the editor list.
 
@@ -210,7 +223,9 @@ the footer, which then puts the caret in the composer. A blurred card does not o
 `boards.template_id` holds the template the board came from, or NULL. It has no foreign key:
 `create_board` checks the id against the `templates` table once, at creation, and keeps it only if
 the row is there. From then on the value is a frozen tag, so admin CRUD can change or delete a
-template without touching the boards already made from it. `TEMPLATE_LEVEL10` (`"level10"` in
+template without touching the boards already made from it — "Apply to boards" is what carries a
+change across. The columns are Solved, Headlines, Rocks and IDS; the first of them read "Segue"
+until the migration of 2026-08-14, which renamed it in the template row alone. `TEMPLATE_LEVEL10` (`"level10"` in
 `models.rs`) turns on the three Level 10 features; every other board carries none of them.
 `db::get_board` reads the scorecard and the ratings only for a Level 10 board, so a broadcast on a
 normal board makes no extra queries.
@@ -275,7 +290,8 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
 ## Key Conventions
 
 - **Vite proxy:** `/api` and `/ws` routes proxy to `localhost:3001` in dev (`vite.config.ts`), so both web and Tauri use relative URLs. `VITE_API_URL` env var overrides for production.
-- **Column colors** are hex strings in `COLUMN_COLORS` array (`lib/types.ts`), passed as props to Column/Ticket components and applied via inline `style`. The two role columns take their own colors from `COLUMN_ROLE_COLORS`; `utils/columnColors.ts` runs the sticky colors across the other columns only.
+- **Column colors** are hex strings in `COLUMN_COLORS` array (`lib/types.ts`), passed as props to Column/Ticket components and applied via inline `style`. The two role columns take their own colors from `COLUMN_ROLE_COLORS`; `utils/columnColors.ts` runs the sticky colors across the other columns only. The five colors repeat on a long board, which costs nothing: no column is read against another one five places away.
+- **A board takes as many columns as the team asks for.** Neither form caps the count and the backend never did; a column keeps its width and the board scrolls sideways past the edge of the window. The spacer at the end of the row in `Board.tsx` is what holds the gutter open at the end of that scroll, which the padding of the page cannot reach.
 - **Previous Actions cards** never blur and take no votes. They are a record of the last retro, not fresh input.
 - **Comments** live in the card modal, set as notes in the margin: a pen mark in the color of the
   column, the remark, and the writer signed under it. The card on the board carries the count only,

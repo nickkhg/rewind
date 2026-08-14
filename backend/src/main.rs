@@ -115,6 +115,11 @@ async fn main() {
             "/api/admin/templates/{id}",
             put(routes::admin::update_template).delete(routes::admin::delete_template),
         )
+        // The one route that reaches back to the boards already made from a template.
+        .route(
+            "/api/admin/templates/{id}/apply",
+            post(routes::admin::apply_template),
+        )
         .route(
             "/api/admin/teams",
             get(routes::admin::list_teams).post(routes::admin::create_team),
