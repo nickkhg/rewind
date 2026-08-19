@@ -33,6 +33,24 @@ function extractBoardId(input: string): string | null {
   return null;
 }
 
+/** True for a column name that means the Previous Actions column, as the server reads it. */
+function namesPreviousActions(name: string): boolean {
+  return name.trim().toLowerCase() === "previous actions";
+}
+
+/**
+ * The chip colors of a template preview. A name that means Previous Actions keeps the color of
+ * its role, and the other names run through the sticky colors, as the board itself does.
+ */
+function previewColors(names: string[]): string[] {
+  let plain = 0;
+  return names.map((name) =>
+    namesPreviousActions(name)
+      ? COLUMN_ROLE_COLORS.previous_actions
+      : COLUMN_COLORS[plain++ % COLUMN_COLORS.length],
+  );
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [title, setTitle] = useState("");
@@ -236,7 +254,7 @@ export default function Home() {
                           key={i}
                           className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-md"
                           style={{
-                            backgroundColor: COLUMN_COLORS[i % COLUMN_COLORS.length],
+                            backgroundColor: previewColors(t.columns)[i],
                             color: "#2d2a26",
                           }}
                         >
@@ -307,7 +325,10 @@ export default function Home() {
 
             <div className="mt-3 flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] text-muted">Every board also gets</span>
-              {(["previous_actions", "actions"] as const).map((role) => (
+              {/* A list that already places Previous Actions is not given it a second time. */}
+              {(["previous_actions", "actions"] as const)
+                .filter((role) => role !== "previous_actions" || !columns.some(namesPreviousActions))
+                .map((role) => (
                 <span
                   key={role}
                   className="inline-block text-[10px] font-medium px-1.5 py-0.5 rounded-md"

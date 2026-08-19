@@ -95,6 +95,7 @@ async fn main() {
             "/api/boards/{id}/actions/import",
             post(routes::boards::import_actions),
         )
+        .route("/api/boards/{id}/title", put(routes::boards::set_title))
         .route("/api/boards/{id}/labels", put(routes::boards::set_labels))
         .route("/api/labels", get(routes::boards::list_labels))
         .route("/api/my-boards", get(routes::boards::my_boards))

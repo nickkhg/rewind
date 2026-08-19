@@ -1,6 +1,6 @@
 {
   "productName": "Rewind",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "identifier": "com.rewind.app",
   "build": {
     "beforeDevCommand": "pnpm dev:frontend",

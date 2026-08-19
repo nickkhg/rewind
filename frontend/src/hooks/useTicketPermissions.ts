@@ -15,6 +15,8 @@ export interface TicketPermissions {
   isAction: boolean;
   /** The board is hidden and this reader may not read this card yet. */
   isBlurred: boolean;
+  /** The reader may edit this card: its author, the facilitator, or an editor. */
+  canEdit: boolean;
   /** The reader may close and re-open the action: its author, the facilitator, or an editor. */
   canSetDone: boolean;
   /** The reader already voted for this card. */
@@ -31,7 +33,13 @@ export function useTicketPermissions(
   ticket: Ticket,
   columnRole?: ColumnRole | null,
 ): TicketPermissions {
-  const { participantId, isFacilitator, board, facilitatorPeek } = useBoardStore();
+  // Selectors, not the whole store: every card on the board runs this hook, and a whole-store
+  // subscription would re-render all of them for state none of them read — the connection flag
+  // on a socket drop first among it.
+  const participantId = useBoardStore((s) => s.participantId);
+  const isFacilitator = useBoardStore((s) => s.isFacilitator);
+  const board = useBoardStore((s) => s.board);
+  const facilitatorPeek = useBoardStore((s) => s.facilitatorPeek);
 
   const isAuthor = ticket.author_id === participantId;
   const isEditor = !!(
@@ -63,6 +71,7 @@ export function useTicketPermissions(
     isRock,
     isAction,
     isBlurred,
+    canEdit: isAuthor || isPrivileged,
     canSetDone: isAction && (isAuthor || isPrivileged),
     hasVoted: participantId ? ticket.votes.includes(participantId) : false,
     actionsColumn: board?.columns.find((c) => c.role === "actions"),

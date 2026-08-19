@@ -47,11 +47,20 @@ export function TicketModal({
 }: TicketModalProps) {
   const board = useBoardStore((s) => s.board);
   const participantId = useBoardStore((s) => s.participantId);
-  const { isAuthor, isPrivileged, isCarried, isRock, isAction, canSetDone, hasVoted, actionsColumn } =
+  const { isAuthor, isPrivileged, isCarried, isRock, isAction, canEdit, canSetDone, hasVoted, actionsColumn } =
     useTicketPermissions(ticket, columnRole);
 
   const panelRef = useRef<HTMLDivElement>(null);
   const [editing, setEditing] = useState(false);
+
+  // `onClose` is made anew on every render of the card under this panel, so the focus trap must
+  // not depend on it: an effect keyed on it would re-run on every rebroadcast of the board and
+  // pull the caret out of whatever field the reader was writing in. The trap reads it through a
+  // ref instead, and runs once, at mount, which is the one moment focus should move.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   const isDone = ticket.done_at !== null;
   const segments = ticket.content.split("\n---\n");
@@ -67,11 +76,14 @@ export function TicketModal({
     const previous = document.activeElement as HTMLElement | null;
     const bodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    panelRef.current?.focus();
+    // A reader who opened the card from the comment mark came to write: the composer takes the
+    // caret (its own effect runs first, being deeper in the tree), and the panel must not take
+    // it back.
+    if (!focusComposer) panelRef.current?.focus();
 
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -96,7 +108,7 @@ export function TicketModal({
       document.body.style.overflow = bodyOverflow;
       previous?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   function handleSaveEdit(content: string, gif: TicketType["gif"]) {
     if (content !== ticket.content || gif?.id !== ticket.gif?.id) {
@@ -300,7 +312,7 @@ export function TicketModal({
                 Move to Actions
               </button>
             )}
-            {isAuthor && !editing && (
+            {canEdit && !editing && (
               <button
                 onClick={() => setEditing(true)}
                 className="text-muted hover:text-ink transition-colors"

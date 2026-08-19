@@ -224,7 +224,7 @@ export function CommentThread({
                       </time>
                       {(isCommentAuthor || isPrivileged) && (
                         <span className="ml-auto hidden group-hover/comment:flex items-center gap-2">
-                          {isCommentAuthor && (
+                          {(isCommentAuthor || isPrivileged) && (
                             <button
                               onClick={() => {
                                 setEditDraft(comment.content);

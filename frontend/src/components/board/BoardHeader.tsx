@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Logo } from "../layout/Logo";
 import { SignedInAs } from "../layout/SignedInAs";
 import { useBoardStore } from "../../store/boardStore";
+import { BoardTitle } from "./BoardTitle";
 import { FacilitatorMenu } from "./FacilitatorMenu";
 import { TimerDisplay } from "./TimerDisplay";
 import { SortControls } from "./SortControls";
@@ -32,7 +33,11 @@ export function BoardHeader({ send }: BoardHeaderProps) {
       <div className="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
           <Logo className="text-xl text-accent shrink-0" />
-          <h1 className="font-display text-lg font-semibold truncate">{board.title}</h1>
+          <BoardTitle
+            boardId={board.id}
+            title={board.title}
+            canRename={isFacilitator || isEditor}
+          />
           {/* The room can see that the link alone does not open this board. */}
           {board.has_password && (
             <span

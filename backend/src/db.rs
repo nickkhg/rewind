@@ -4,9 +4,10 @@ use sqlx::PgPool;
 use std::collections::HashSet;
 
 use crate::models::{
-    ActionSourceBoard, ApplyTemplateResult, Board, Column, Comment, EditorRequestView, EditorView,
-    Gif, ImportResult, LabelCount, MeetingRatingView, ScorecardMetric, Ticket, DONE_COLUMN_ROLES,
-    ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS, TEMPLATE_LEVEL10,
+    is_previous_actions_name, ActionSourceBoard, ApplyTemplateResult, Board, Column, Comment,
+    EditorRequestView, EditorView, Gif, ImportResult, LabelCount, MeetingRatingView,
+    ScorecardMetric, Ticket, DONE_COLUMN_ROLES, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS,
+    TEMPLATE_LEVEL10,
 };
 use crate::state::MergeSnapshot;
 
@@ -325,6 +326,21 @@ pub async fn set_board_password(
     Ok(result.rows_affected() > 0)
 }
 
+/// Renames a board. Gives false when there is no such board.
+pub async fn set_board_title(
+    pool: &PgPool,
+    board_id: &str,
+    title: &str,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query("UPDATE boards SET title = $1 WHERE id = $2")
+        .bind(title)
+        .bind(board_id)
+        .execute(pool)
+        .await?;
+
+    Ok(result.rows_affected() > 0)
+}
+
 pub async fn get_board_facilitator_id(
     pool: &PgPool,
     board_id: &str,
@@ -460,27 +476,188 @@ pub async fn update_template(
     Ok(result.rows_affected() > 0)
 }
 
-/// Brings the columns of a template across to the boards already made from it.
+/// What one board must do to read like its template. `plan_template_apply` makes it and holds
+/// no SQL, so the rules can be tested on their own; `apply_template_to_boards` carries it out.
+#[derive(Debug, Default, PartialEq)]
+struct TemplateApplyPlan {
+    /// (column id, template name): the columns that take a name they did not have.
+    renames: Vec<(String, String)>,
+    /// (name, role): the columns the board never had, in template order.
+    adds: Vec<(String, Option<&'static str>)>,
+    /// Every column of the board in its new order. An added column stands as its index into
+    /// `adds`, because it has no id until the row is written.
+    order: Vec<PlannedColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum PlannedColumn {
+    Existing(String),
+    Added(usize),
+}
+
+/// What a template name has done with its slot while the plan is made.
+enum Slot {
+    Open,
+    Dropped,
+    Taken(PlannedColumn),
+}
+
+/// Plans how the columns of one board take the names of its template.
 ///
-/// A board is a copy of its template and not a view of it, so a rename in the template reaches
-/// nothing by itself. This is the one place that changes a board that already exists.
+/// The names take the columns in passes, and the order of the passes matters:
 ///
-/// The template names take their columns in two passes over the columns that are neither
-/// Previous Actions nor Actions:
-///
-/// 1. **By name.** A name that the board already has takes that column, whatever place it holds.
-///    This is what carries an order across: a template that puts IDS before Rocks moves the two
-///    columns of the board, and the cards go with them.
-/// 2. **By position.** The names that matched nothing take the columns that matched nothing, in
+/// 1. **By role.** A name that reads "previous actions", in any case, takes the board's own
+///    Previous Actions column, wherever the template put the name. The column is matched by
+///    role and never made anew — every board already has one, and the unique index keeps it
+///    that way — so only the first such name counts and the rest are dropped. A template that
+///    never names it leaves the column where it stands.
+/// 2. **By name.** A name that the board already has takes that column, whatever place it
+///    holds. This is what carries an order across: a template that puts IDS before Rocks moves
+///    the two columns of the board, and the cards go with them.
+/// 3. **By position.** The names that matched nothing take the columns that matched nothing, in
 ///    the order both are in. This is what carries a rename across: "Segue" becomes "Solved" and
 ///    keeps its cards.
 ///
-/// A name that is left over is added as a new column. Nothing is ever deleted, so no card is lost
-/// by an apply: a column the template no longer names keeps its cards and stands after the
-/// columns the template does name. Actions stays last.
+/// A name that is left over is added as a new column. Nothing is ever deleted, so no card is
+/// lost by an apply: a column the template no longer names keeps its cards and stands after the
+/// columns the template does name. Actions stays last, always.
 ///
-/// The two passes matter in that order. Name first, position second, is what stops a reordered
-/// template from renaming the columns under the cards of a board.
+/// Name before position is what stops a reordered template from renaming the columns under the
+/// cards of a board. On a Level 10 board a name added as "rocks" takes `ROLE_ROCKS`, as it
+/// would at creation.
+fn plan_template_apply(
+    columns: &[ColumnRow],
+    names: &[String],
+    is_level10: bool,
+) -> TemplateApplyPlan {
+    let head: Vec<&ColumnRow> = columns
+        .iter()
+        .filter(|c| c.role.as_deref() == Some(ROLE_PREVIOUS_ACTIONS))
+        .collect();
+    let tail: Vec<&ColumnRow> = columns
+        .iter()
+        .filter(|c| c.role.as_deref() == Some(ROLE_ACTIONS))
+        .collect();
+    let body: Vec<&ColumnRow> = columns
+        .iter()
+        .filter(|c| {
+            !matches!(
+                c.role.as_deref(),
+                Some(ROLE_PREVIOUS_ACTIONS) | Some(ROLE_ACTIONS)
+            )
+        })
+        .collect();
+
+    let mut rocks_taken = body.iter().any(|c| c.role.as_deref() == Some(ROLE_ROCKS));
+    let mut plan = TemplateApplyPlan::default();
+
+    // One slot for each name of the template, in the order the template holds them.
+    let mut slots: Vec<Slot> = names.iter().map(|_| Slot::Open).collect();
+    // A column the board holds and no name has claimed yet.
+    let mut free: Vec<&&ColumnRow> = body.iter().collect();
+
+    // Pass one: the Previous Actions column goes to the first name that means it, by role.
+    let mut previous_placed = false;
+    for (slot, name) in slots.iter_mut().zip(names.iter()) {
+        if !is_previous_actions_name(name) {
+            continue;
+        }
+        if !previous_placed {
+            if let Some(previous) = head.first() {
+                *slot = Slot::Taken(PlannedColumn::Existing(previous.id.clone()));
+                previous_placed = true;
+                continue;
+            }
+        }
+        *slot = Slot::Dropped;
+    }
+
+    // Pass two: a name that the board already has keeps its own column, wherever it stands.
+    for (slot, name) in slots.iter_mut().zip(names.iter()) {
+        if !matches!(slot, Slot::Open) {
+            continue;
+        }
+        let wanted = name.trim().to_lowercase();
+        if let Some(at) = free
+            .iter()
+            .position(|c| c.name.trim().to_lowercase() == wanted)
+        {
+            *slot = Slot::Taken(PlannedColumn::Existing(free.remove(at).id.clone()));
+        }
+    }
+
+    // Pass three: what is left of the names takes what is left of the columns, in order. Any
+    // name still without a column becomes one.
+    for (slot, name) in slots.iter_mut().zip(names.iter()) {
+        if !matches!(slot, Slot::Open) {
+            continue;
+        }
+        if !free.is_empty() {
+            let column = free.remove(0);
+            plan.renames.push((column.id.clone(), name.clone()));
+            *slot = Slot::Taken(PlannedColumn::Existing(column.id.clone()));
+            continue;
+        }
+
+        // A column the board never had. On a Level 10 board the Rocks column takes its role
+        // here as it would at creation, so that a card in it can carry a rock status. One
+        // column of each role to a board, as ever.
+        let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks" {
+            rocks_taken = true;
+            Some(ROLE_ROCKS)
+        } else {
+            None
+        };
+        *slot = Slot::Taken(PlannedColumn::Added(plan.adds.len()));
+        plan.adds.push((name.clone(), role));
+    }
+
+    // The board reads: the columns the template names in its own order, the columns it no
+    // longer names, the output.
+    let mut order: Vec<PlannedColumn> = slots
+        .into_iter()
+        .filter_map(|slot| match slot {
+            Slot::Taken(column) => Some(column),
+            _ => None,
+        })
+        .chain(free.iter().map(|c| PlannedColumn::Existing(c.id.clone())))
+        .chain(tail.iter().map(|c| PlannedColumn::Existing(c.id.clone())))
+        .collect();
+
+    // A template that never names Previous Actions leaves the column where it stands, which is
+    // read against the board's own columns: the column keeps its place after the nearest
+    // column above it that the plan still holds, and a column that led the board leads it
+    // still. Prepending it instead would undo the placement an earlier apply or the Level 10
+    // migration gave it.
+    if !previous_placed {
+        if let Some(previous) = head.first() {
+            let above: Vec<&str> = columns
+                .iter()
+                .take_while(|c| c.id != previous.id)
+                .map(|c| c.id.as_str())
+                .collect();
+            let at = above
+                .iter()
+                .rev()
+                .find_map(|id| {
+                    order.iter().position(
+                        |p| matches!(p, PlannedColumn::Existing(existing) if existing == id),
+                    )
+                })
+                .map_or(0, |i| i + 1);
+            order.insert(at, PlannedColumn::Existing(previous.id.clone()));
+        }
+    }
+
+    plan.order = order;
+    plan
+}
+
+/// Brings the columns of a template across to the boards already made from it.
+///
+/// A board is a copy of its template and not a view of it, so a rename in the template reaches
+/// nothing by itself. This is the one place that changes a board that already exists. The rules
+/// live in `plan_template_apply`; this function runs the SQL the plan asks for.
 pub async fn apply_template_to_boards(
     pool: &PgPool,
     template_id: &str,
@@ -510,72 +687,18 @@ pub async fn apply_template_to_boards(
         .fetch_all(&mut *tx)
         .await?;
 
-        let head: Vec<&ColumnRow> = columns
-            .iter()
-            .filter(|c| c.role.as_deref() == Some(ROLE_PREVIOUS_ACTIONS))
-            .collect();
-        let tail: Vec<&ColumnRow> = columns
-            .iter()
-            .filter(|c| c.role.as_deref() == Some(ROLE_ACTIONS))
-            .collect();
-        let body: Vec<&ColumnRow> = columns
-            .iter()
-            .filter(|c| {
-                !matches!(
-                    c.role.as_deref(),
-                    Some(ROLE_PREVIOUS_ACTIONS) | Some(ROLE_ACTIONS)
-                )
-            })
-            .collect();
+        let plan = plan_template_apply(&columns, names, is_level10);
 
-        let mut rocks_taken = body.iter().any(|c| c.role.as_deref() == Some(ROLE_ROCKS));
-        let mut renamed = 0i64;
-        let mut added = 0i64;
-
-        // One slot for each name of the template, in the order the template holds them. A slot
-        // holds the id of the column that takes the name.
-        let mut slots: Vec<Option<String>> = vec![None; names.len()];
-        // A column the board holds and no name has claimed yet.
-        let mut free: Vec<&&ColumnRow> = body.iter().collect();
-
-        // Pass one: a name that the board already has keeps its own column, wherever it stands.
-        for (slot, name) in slots.iter_mut().zip(names.iter()) {
-            let wanted = name.trim().to_lowercase();
-            if let Some(at) = free
-                .iter()
-                .position(|c| c.name.trim().to_lowercase() == wanted)
-            {
-                *slot = Some(free.remove(at).id.clone());
-            }
+        for (id, name) in &plan.renames {
+            sqlx::query("UPDATE columns SET name = $1 WHERE id = $2")
+                .bind(name)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
         }
 
-        // Pass two: what is left of the names takes what is left of the columns, in order. Any
-        // name still without a column becomes one.
-        for (slot, name) in slots.iter_mut().zip(names.iter()) {
-            if slot.is_some() {
-                continue;
-            }
-            if !free.is_empty() {
-                let column = free.remove(0);
-                sqlx::query("UPDATE columns SET name = $1 WHERE id = $2")
-                    .bind(name)
-                    .bind(&column.id)
-                    .execute(&mut *tx)
-                    .await?;
-                renamed += 1;
-                *slot = Some(column.id.clone());
-                continue;
-            }
-
-            // A column the board never had. On a Level 10 board the Rocks column takes its role
-            // here as it would at creation, so that a card in it can carry a rock status. One
-            // column of each role to a board, as ever.
-            let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks" {
-                rocks_taken = true;
-                Some(ROLE_ROCKS)
-            } else {
-                None
-            };
+        let mut added_ids: Vec<String> = Vec::with_capacity(plan.adds.len());
+        for (name, role) in &plan.adds {
             let id = nanoid!(8);
             sqlx::query(
                 "INSERT INTO columns (id, board_id, name, position, role) \
@@ -585,21 +708,22 @@ pub async fn apply_template_to_boards(
             .bind(&board.id)
             .bind(name)
             .bind(0i32)
-            .bind(role)
+            .bind(*role)
             .execute(&mut *tx)
             .await?;
-            added += 1;
-            *slot = Some(id);
+            added_ids.push(id);
         }
 
-        // The board reads: the record, the columns the template names in its own order, the
-        // columns it no longer names, the output.
-        let order: Vec<&str> = head
+        let renamed = plan.renames.len() as i64;
+        let added = plan.adds.len() as i64;
+
+        let order: Vec<&str> = plan
+            .order
             .iter()
-            .map(|c| c.id.as_str())
-            .chain(slots.iter().filter_map(|slot| slot.as_deref()))
-            .chain(free.iter().map(|c| c.id.as_str()))
-            .chain(tail.iter().map(|c| c.id.as_str()))
+            .map(|column| match column {
+                PlannedColumn::Existing(id) => id.as_str(),
+                PlannedColumn::Added(at) => added_ids[*at].as_str(),
+            })
             .collect();
 
         let moved = order
@@ -2423,4 +2547,195 @@ struct TeamMemberRow {
     id: String,
     team_id: String,
     name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn col(id: &str, name: &str, position: i32, role: Option<&str>) -> ColumnRow {
+        ColumnRow {
+            id: id.into(),
+            name: name.into(),
+            position,
+            role: role.map(|r| r.into()),
+        }
+    }
+
+    /// A Level 10 board as the old template made it: Previous Actions first, Actions last.
+    fn level10_board() -> Vec<ColumnRow> {
+        vec![
+            col("prev", "Previous Actions", 0, Some(ROLE_PREVIOUS_ACTIONS)),
+            col("solved", "Segue", 1, None),
+            col("head", "Headlines", 2, None),
+            col("rocks", "Rocks", 3, Some(ROLE_ROCKS)),
+            col("ids", "IDS", 4, None),
+            col("act", "Actions", 5, Some(ROLE_ACTIONS)),
+        ]
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// The new order as readable ids. An added column reads as its name behind a plus.
+    fn order_of(plan: &TemplateApplyPlan) -> Vec<String> {
+        plan.order
+            .iter()
+            .map(|column| match column {
+                PlannedColumn::Existing(id) => id.clone(),
+                PlannedColumn::Added(at) => format!("+{}", plan.adds[*at].0),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_rename_goes_by_position_and_keeps_the_column() {
+        let plan = plan_template_apply(
+            &level10_board(),
+            &names(&["Solved", "Headlines", "Rocks", "IDS"]),
+            true,
+        );
+        assert_eq!(
+            plan.renames,
+            vec![("solved".to_string(), "Solved".to_string())]
+        );
+        assert!(plan.adds.is_empty());
+        assert_eq!(
+            order_of(&plan),
+            vec!["prev", "solved", "head", "rocks", "ids", "act"]
+        );
+    }
+
+    #[test]
+    fn a_name_the_board_has_keeps_its_column_and_carries_the_order() {
+        let plan = plan_template_apply(
+            &level10_board(),
+            &names(&["IDS", "Headlines", "Rocks", "Segue"]),
+            true,
+        );
+        assert!(plan.renames.is_empty());
+        assert!(plan.adds.is_empty());
+        assert_eq!(
+            order_of(&plan),
+            vec!["prev", "ids", "head", "rocks", "solved", "act"]
+        );
+    }
+
+    #[test]
+    fn a_template_that_names_previous_actions_places_it_by_role() {
+        let plan = plan_template_apply(
+            &level10_board(),
+            &names(&["Segue", "Headlines", "Previous Actions", "Rocks", "IDS"]),
+            true,
+        );
+        assert!(plan.renames.is_empty());
+        assert!(plan.adds.is_empty());
+        assert_eq!(
+            order_of(&plan),
+            vec!["solved", "head", "prev", "rocks", "ids", "act"]
+        );
+    }
+
+    #[test]
+    fn a_template_that_does_not_name_it_leaves_previous_actions_where_it_is() {
+        let plan = plan_template_apply(
+            &level10_board(),
+            &names(&["Segue", "Headlines", "Rocks", "IDS"]),
+            true,
+        );
+        assert_eq!(
+            order_of(&plan),
+            vec!["prev", "solved", "head", "rocks", "ids", "act"]
+        );
+    }
+
+    #[test]
+    fn an_unnamed_previous_actions_keeps_a_place_in_the_middle_of_the_board() {
+        // The board as the migration of 2026-08-19 leaves it: Previous Actions after Headlines.
+        let board = vec![
+            col("solved", "Solved", 0, None),
+            col("head", "Headlines", 1, None),
+            col("prev", "Previous Actions", 2, Some(ROLE_PREVIOUS_ACTIONS)),
+            col("rocks", "Rocks", 3, Some(ROLE_ROCKS)),
+            col("ids", "IDS", 4, None),
+            col("act", "Actions", 5, Some(ROLE_ACTIONS)),
+        ];
+        let plan = plan_template_apply(
+            &board,
+            &names(&["Solved", "Headlines", "Rocks", "IDS"]),
+            true,
+        );
+        assert_eq!(
+            order_of(&plan),
+            vec!["solved", "head", "prev", "rocks", "ids", "act"]
+        );
+
+        // A reorder of the named columns carries the neighbour with it: the column stays
+        // behind Headlines, wherever Headlines goes.
+        let plan = plan_template_apply(
+            &board,
+            &names(&["Headlines", "Solved", "Rocks", "IDS"]),
+            true,
+        );
+        assert_eq!(
+            order_of(&plan),
+            vec!["head", "prev", "solved", "rocks", "ids", "act"]
+        );
+    }
+
+    #[test]
+    fn a_second_mention_of_previous_actions_is_dropped_and_never_added() {
+        let plan = plan_template_apply(
+            &level10_board(),
+            &names(&["previous actions", "Segue", "Previous Actions"]),
+            true,
+        );
+        assert!(plan.adds.is_empty());
+        assert_eq!(
+            order_of(&plan),
+            vec!["prev", "solved", "head", "rocks", "ids", "act"]
+        );
+    }
+
+    #[test]
+    fn a_leftover_name_becomes_a_column_and_rocks_takes_its_role_on_level10() {
+        let board = vec![
+            col("prev", "Previous Actions", 0, Some(ROLE_PREVIOUS_ACTIONS)),
+            col("solved", "Solved", 1, None),
+            col("act", "Actions", 2, Some(ROLE_ACTIONS)),
+        ];
+        let plan = plan_template_apply(&board, &names(&["Solved", "Rocks"]), true);
+        assert_eq!(plan.adds, vec![("Rocks".to_string(), Some(ROLE_ROCKS))]);
+        assert_eq!(order_of(&plan), vec!["prev", "solved", "+Rocks", "act"]);
+
+        // On any other board the name stays free text, as at creation.
+        let plan = plan_template_apply(&board, &names(&["Solved", "Rocks"]), false);
+        assert_eq!(plan.adds, vec![("Rocks".to_string(), None)]);
+    }
+
+    #[test]
+    fn a_column_the_template_no_longer_names_stays_and_actions_stays_last() {
+        let plan = plan_template_apply(&level10_board(), &names(&["Headlines"]), true);
+        assert!(plan.renames.is_empty());
+        assert!(plan.adds.is_empty());
+        // The named column leads, the unnamed keep their order, Actions closes the board.
+        assert_eq!(
+            order_of(&plan),
+            vec!["prev", "head", "solved", "rocks", "ids", "act"]
+        );
+    }
+
+    #[test]
+    fn name_beats_position_so_a_reorder_renames_nothing() {
+        let board = vec![
+            col("prev", "Previous Actions", 0, Some(ROLE_PREVIOUS_ACTIONS)),
+            col("a", "Went well", 1, None),
+            col("b", "To improve", 2, None),
+            col("act", "Actions", 3, Some(ROLE_ACTIONS)),
+        ];
+        let plan = plan_template_apply(&board, &names(&["To improve", "Went well"]), false);
+        assert!(plan.renames.is_empty());
+        assert_eq!(order_of(&plan), vec!["prev", "b", "a", "act"]);
+    }
 }

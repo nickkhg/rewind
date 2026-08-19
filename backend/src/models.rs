@@ -22,13 +22,66 @@ pub fn valid_rock_status(status: &str) -> bool {
 /// over from the last one. A card anywhere else is an observation, which is never finished.
 pub const DONE_COLUMN_ROLES: [&str; 2] = [ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS];
 
-/// Column names that only the two role columns can use.
-pub const RESERVED_COLUMN_NAMES: [&str; 4] = [
-    "actions",
-    "action items",
-    "action item",
-    "previous actions",
-];
+/// Column names that only the Actions column can use. A caller cannot place Actions: it goes
+/// last, always, and a requested column with one of these names is dropped. Previous Actions is
+/// not here, because naming it is how a caller places it.
+pub const RESERVED_COLUMN_NAMES: [&str; 3] = ["actions", "action items", "action item"];
+
+/// The name every Previous Actions column carries. A caller writes it in any case to place the
+/// column; the board keeps this form.
+pub const PREVIOUS_ACTIONS_NAME: &str = "Previous Actions";
+
+/// True when a requested column name means the Previous Actions column.
+pub fn is_previous_actions_name(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("previous actions")
+}
+
+/// Plans the columns of a new board from the names the caller asked for.
+///
+/// Every board gets Previous Actions and Actions. The caller places Previous Actions by naming
+/// it: the slot with that name, in any case, becomes the column, and only the first mention
+/// counts — one column of the role to a board. A list that never names it gets it first, as
+/// every board did before the column was placeable. Actions goes last, always, and the names in
+/// `RESERVED_COLUMN_NAMES` are dropped. On a Level 10 board the first column named "rocks"
+/// takes `ROLE_ROCKS`, which is what lets a card in it carry a rock status.
+pub fn plan_new_board_columns(
+    requested: &[String],
+    is_level10: bool,
+) -> Vec<(String, Option<&'static str>)> {
+    let mut columns: Vec<(String, Option<&'static str>)> = Vec::new();
+    let mut previous_taken = false;
+    let mut rocks_taken = false;
+
+    for name in requested {
+        if is_previous_actions_name(name) {
+            if !previous_taken {
+                previous_taken = true;
+                columns.push((PREVIOUS_ACTIONS_NAME.to_string(), Some(ROLE_PREVIOUS_ACTIONS)));
+            }
+            continue;
+        }
+        let lowered = name.trim().to_lowercase();
+        if RESERVED_COLUMN_NAMES.contains(&lowered.as_str()) {
+            continue;
+        }
+        let role = if is_level10 && !rocks_taken && lowered == "rocks" {
+            rocks_taken = true;
+            Some(ROLE_ROCKS)
+        } else {
+            None
+        };
+        columns.push((name.clone(), role));
+    }
+
+    if !previous_taken {
+        columns.insert(
+            0,
+            (PREVIOUS_ACTIONS_NAME.to_string(), Some(ROLE_PREVIOUS_ACTIONS)),
+        );
+    }
+    columns.push(("Actions".to_string(), Some(ROLE_ACTIONS)));
+    columns
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Board {
@@ -475,6 +528,19 @@ pub fn read_password(raw: Option<&str>) -> Result<Option<String>, String> {
     Ok(Some(password.to_string()))
 }
 
+/// Reads a board title the way the board will keep it, or says what is wrong with it.
+///
+/// The ends are trimmed, because a title that came from a form carries whatever the paste
+/// brought with it. An empty value is refused: a board with no name cannot be told apart on
+/// any list. Creation and a rename both read the title through here, so the two cannot drift.
+pub fn read_title(raw: &str) -> Result<String, String> {
+    let title = raw.trim();
+    if title.is_empty() {
+        return Err("Title is required".to_string());
+    }
+    Ok(title.to_string())
+}
+
 /// What a person learns about a board before they are let in: enough to draw the gate, and
 /// nothing that is on the board.
 #[derive(Debug, Clone, Serialize)]
@@ -696,6 +762,17 @@ mod tests {
     }
 
     #[test]
+    fn a_title_loses_the_space_at_its_ends_and_keeps_the_rest() {
+        assert_eq!(read_title("  Sprint 12  "), Ok("Sprint 12".to_string()));
+    }
+
+    #[test]
+    fn an_empty_title_is_refused() {
+        assert!(read_title("").is_err());
+        assert!(read_title("   ").is_err());
+    }
+
+    #[test]
     fn mask_keeps_the_shape_and_drops_the_words() {
         let masked = mask_text("Deploy broke\ntwice");
         assert_eq!(masked.chars().count(), "Deploy broke\ntwice".chars().count());
@@ -746,5 +823,79 @@ mod tests {
         });
         view.redact_hidden_for("me", false);
         assert_eq!(find(&view, "t-theirs").content, "The deploy broke");
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|n| n.to_string()).collect()
+    }
+
+    #[test]
+    fn a_board_that_names_no_previous_actions_gets_it_first() {
+        let plan = plan_new_board_columns(&names(&["Went well", "To improve"]), false);
+        let got: Vec<(&str, Option<&str>)> =
+            plan.iter().map(|(n, r)| (n.as_str(), *r)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Previous Actions", Some(ROLE_PREVIOUS_ACTIONS)),
+                ("Went well", None),
+                ("To improve", None),
+                ("Actions", Some(ROLE_ACTIONS)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_named_previous_actions_takes_its_place_and_the_canonical_name() {
+        let plan =
+            plan_new_board_columns(&names(&["Went well", "previous actions", "Ideas"]), false);
+        let got: Vec<(&str, Option<&str>)> =
+            plan.iter().map(|(n, r)| (n.as_str(), *r)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Went well", None),
+                ("Previous Actions", Some(ROLE_PREVIOUS_ACTIONS)),
+                ("Ideas", None),
+                ("Actions", Some(ROLE_ACTIONS)),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_first_mention_of_previous_actions_wins_and_the_rest_are_dropped() {
+        let plan = plan_new_board_columns(
+            &names(&["PREVIOUS ACTIONS", "Went well", "  previous actions  "]),
+            false,
+        );
+        let roles: Vec<Option<&str>> = plan.iter().map(|(_, r)| *r).collect();
+        assert_eq!(
+            roles,
+            vec![Some(ROLE_PREVIOUS_ACTIONS), None, Some(ROLE_ACTIONS)]
+        );
+        assert_eq!(plan[0].0, "Previous Actions");
+    }
+
+    #[test]
+    fn the_actions_names_stay_reserved_and_actions_stays_last() {
+        let plan = plan_new_board_columns(
+            &names(&["Actions", "action items", "Went well", "Action Item"]),
+            false,
+        );
+        let got: Vec<&str> = plan.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(got, vec!["Previous Actions", "Went well", "Actions"]);
+        assert_eq!(plan.last().unwrap().1, Some(ROLE_ACTIONS));
+    }
+
+    #[test]
+    fn only_a_level10_board_gives_rocks_its_role() {
+        let requested = names(&["Rocks", "previous actions", "rocks"]);
+        let plan = plan_new_board_columns(&requested, true);
+        assert_eq!(plan[0], ("Rocks".to_string(), Some(ROLE_ROCKS)));
+        // The second rocks stays free text: one column of the role to a board.
+        assert_eq!(plan[2], ("rocks".to_string(), None));
+
+        let plan = plan_new_board_columns(&requested, false);
+        assert_eq!(plan[0], ("Rocks".to_string(), None));
     }
 }

@@ -178,6 +178,21 @@ export async function importActions(
   return res.json();
 }
 
+/**
+ * Renames a board. The facilitator and the editors alone. The saved name comes back to every
+ * open client on the socket, so the caller has nothing to write into the store.
+ */
+export async function updateBoardTitle(boardId: string, title: string): Promise<string> {
+  const res = await fetch(`${getServerUrl()}/api/boards/${boardId}/title`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ title, ...boardAuth(boardId) }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function fetchLabels(): Promise<LabelCount[]> {
   const res = await fetch(`${getServerUrl()}/api/labels`);
   if (!res.ok) throw new Error(await res.text());
