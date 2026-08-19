@@ -25,13 +25,13 @@ cargo check --workspace
 
 Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri/` (Tauri v2 desktop wrapper). Cargo workspace at root, pnpm workspace for frontend.
 
-**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the carry-over, and the board password. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
+**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the board title, the carry-over, and the board password. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
 
 **Backend state:** `AppState` holds a `PgPool` for database access and a parallel map of `tokio::sync::broadcast` channels (capacity 64) for WebSocket fan-out plus in-memory participant tracking.
 
 **Frontend state:** Zustand store (`boardStore.ts`) holds board, participantId, isFacilitator, isConnected, sortMode. The `useWebSocket` hook connects on mount, sends Join with name + optional facilitator token from `sessionStorage`, and dispatches server messages to the store. Auto-reconnects on close (2s delay).
 
-**Auth model:** No accounts. Facilitator gets a `facilitator_token` on board creation, stored in `sessionStorage`. Only the facilitator can toggle blur. Authors can edit/delete their own tickets. Anyone can vote (idempotent toggle via HashSet). A board can also ask for a password, which the server checks before it hands the board to anyone (see Password-Protected Boards). A deployment can put the whole server behind a work account as well (see Signing In with Entra), which says who a person is and nothing about what they may do.
+**Auth model:** No accounts. Facilitator gets a `facilitator_token` on board creation, stored in `sessionStorage`. Only the facilitator can toggle blur. The author, the facilitator, or an editor can edit or delete a ticket. Anyone can vote (idempotent toggle via HashSet). A board can also ask for a password, which the server checks before it hands the board to anyone (see Password-Protected Boards). A deployment can put the whole server behind a work account as well (see Signing In with Entra), which says who a person is and nothing about what they may do.
 
 ## WebSocket Protocol
 
@@ -46,7 +46,7 @@ Server → Client: `BoardState` (after every mutation), `Authenticated` (after J
 
 ## Column Roles and the Carry-Over
 
-Every board has two columns with a `role` in the `columns` table: `previous_actions` (first) and `actions` (last). A unique partial index keeps one column of each role per board. All other columns have `role = NULL` and keep their free-text names. Templates must not supply an action column — `create_board` drops a requested column that uses one of `RESERVED_COLUMN_NAMES` (`models.rs`).
+Every board has two columns with a `role` in the `columns` table: `previous_actions` and `actions` (last, always). A unique partial index keeps one column of each role per board. All other columns have `role = NULL` and keep their free-text names. Previous Actions is placeable: a template or a custom board that names "previous actions", in any case, puts the column at that slot, with the canonical name and the role, and only the first mention counts. A list that never names it gets it first, as every board once did. Only the Actions names stay reserved — `models::plan_new_board_columns` plans all of this, drops a requested column that uses one of `RESERVED_COLUMN_NAMES` (`models.rs`), and appends Actions last.
 
 A third role, `rocks`, belongs to Level 10 boards alone. Only the `level10` creation path assigns it: the first requested column whose trimmed name reads "rocks", in any case, takes `ROLE_ROCKS`. The name stays free text everywhere else — `RESERVED_COLUMN_NAMES` does not hold "rocks", so the Rocks column of the Sailboat template keeps `role = NULL` and carries no rock status.
 
@@ -57,6 +57,7 @@ team did not close come back to the same column of the next meeting.
 - `GET /api/boards/{id}/action-sources?q=&labels=` lists the boards that hold at least one card, in any column, newest first. `labels` is comma-separated and matches any. The row carries `action_count` and `card_count`.
 - `POST /api/boards/{id}/actions/import` with `{ source_board_id, source_column_id?, target_column_id?, facilitator_token?, participant_id? }` copies them. Naming no column keeps the old behaviour: Actions there into Previous Actions here. A column id is read only when it sits on the board named beside it, because the board is what the password and the editor list are checked against. `db::copy_cards` skips a card whose text is already in the target column, so a second copy adds nothing. Votes and rock status do not move. A done mark comes across only into a column whose role is one of `DONE_COLUMN_ROLES`, so a closed action carried into a free-text column arrives open. The new cards keep `carried_from_board_id` and `carried_from_board_title`, which the card shows as its source — and which also keeps them out of the blur, as a carried action has always been.
 - `PUT /api/boards/{id}/labels` and `GET /api/labels` manage the board labels. Labels are free text, kept lower case, six per board at most (`normalize_labels` in `models.rs`).
+- `PUT /api/boards/{id}/title` renames a board, under the same privileged check as the labels: renaming is editing, so an editor may do it, unlike the password. `read_title` in `models.rs` trims the name and refuses an empty one, at creation and at a rename alike. The header shows the field to the facilitator and the editors — a click on the name, or the pencil beside it — and the saved name comes back on the broadcast, so the client writes nothing into the store itself.
 
 **A board is a copy of its template, not a view of it.** `create_board` reads the column names
 once and writes rows to `columns`; from then on the template can be renamed, re-columned or
@@ -66,13 +67,18 @@ the template no longer names. Each changed board is rebroadcast, because a board
 someone's browser holds the old columns until it is told otherwise. The admin reads the counts
 back: `{ boards_examined, boards_changed, columns_renamed, columns_added, columns_moved }`.
 
-**The names take the columns in two passes, and the order matters.** First by name: a name the
-board already has takes that column wherever it stands, which is what carries an *order* across.
-Then by position: the names that matched nothing take the columns that matched nothing, in the
-order both are in, which is what carries a *rename* across ("Segue" becomes "Solved" and keeps
-its cards). A name still without a column becomes one. Name first and position second is what
-stops a reordered template from renaming the columns under the cards of a board. A name added as
-"rocks" on a Level 10 board takes `ROLE_ROCKS`, as it would at creation, and Actions stays last.
+**The names take the columns in passes, and the order matters.** First by role: a name that
+reads "Previous Actions" takes the board's own `previous_actions` column, wherever the template
+put the name — matched by role and never made anew, so an apply *moves* the column and no board
+ever gets a second one, which the unique index would refuse. A template that does not name it
+leaves it where it sits. Then by name: a name the board already has takes that column wherever
+it stands, which is what carries an *order* across. Then by position: the names that matched
+nothing take the columns that matched nothing, in the order both are in, which is what carries
+a *rename* across ("Segue" becomes "Solved" and keeps its cards). A name still without a column
+becomes one. Name before position is what stops a reordered template from renaming the columns
+under the cards of a board. A name added as "rocks" on a Level 10 board takes `ROLE_ROCKS`, as
+it would at creation, and Actions stays last. The plan is pure (`db::plan_template_apply`, with
+its tests beside it) and the SQL runs from what it says.
 
 **Column order lives in the template.** The admin form holds the list, with a number and a pair
 of arrows on each row, and "Apply to boards" carries the order to the boards already made. A
@@ -246,8 +252,10 @@ the footer, which then puts the caret in the composer. A blurred card does not o
 `create_board` checks the id against the `templates` table once, at creation, and keeps it only if
 the row is there. From then on the value is a frozen tag, so admin CRUD can change or delete a
 template without touching the boards already made from it — "Apply to boards" is what carries a
-change across. The columns are Solved, Headlines, Rocks and IDS; the first of them read "Segue"
-until the migration of 2026-08-14, which renamed it in the template row alone. `TEMPLATE_LEVEL10` (`"level10"` in
+change across. The columns are Solved, Headlines, Previous Actions, Rocks and IDS; the first of
+them read "Segue" until the migration of 2026-08-14, which renamed it in the template row alone,
+and Previous Actions moved in after Headlines with the migration of 2026-08-19, which also moves
+the column on every board already made from the template. `TEMPLATE_LEVEL10` (`"level10"` in
 `models.rs`) turns on the three Level 10 features; every other board carries none of them.
 `db::get_board` reads the scorecard and the ratings only for a Level 10 board, so a broadcast on a
 normal board makes no extra queries.
@@ -318,8 +326,8 @@ draft. `utils/gifCommand.ts` reads the command, which has to sit at the end of t
 - **Comments** live in the card modal, set as notes in the margin: a pen mark in the color of the
   column, the remark, and the writer signed under it. The card on the board carries the count only,
   on the mark in its footer that opens the card. A card that is blurred for you shows no comment
-  control, because you cannot read the card yet. Anyone can comment, the writer can edit, and the
-  writer, the facilitator, or an editor can delete. A merge moves the comments of the source card
+  control, because you cannot read the card yet. Anyone can comment, and the writer, the
+  facilitator, or an editor can edit or delete. A merge moves the comments of the source card
   onto the target card, and an undo sends them back.
 - **A drag reads by where it ends.** In its own column, a card dropped on another card merges the
   two — two people wrote the same thing — and the undo toast follows. Dropped anywhere in another

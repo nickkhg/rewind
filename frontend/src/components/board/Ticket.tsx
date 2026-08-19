@@ -39,6 +39,7 @@ export function TicketCard({
     isRock,
     isAction,
     isBlurred,
+    canEdit,
     canSetDone,
     hasVoted,
     actionsColumn,
@@ -284,7 +285,7 @@ export function TicketCard({
                   )}
                 </div>
               )}
-              {isAuthor && (
+              {canEdit && !isBlurred && (
                 <button onClick={() => setEditing(true)} className="text-xs text-muted hover:text-ink">
                   Edit
                 </button>

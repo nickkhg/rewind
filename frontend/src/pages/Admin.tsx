@@ -392,6 +392,10 @@ function TemplateForm({
         >
           + Add column
         </button>
+        <p className="mt-1 text-[11px] text-muted/70">
+          Name &ldquo;Previous Actions&rdquo; to place that column; leave it out and it goes
+          first. Actions always goes last.
+        </p>
       </div>
 
       <div>
@@ -516,8 +520,9 @@ function ApplyTemplateDialog({
             </div>
             <p className="text-sm text-muted">
               A column the board already has by name keeps its cards and moves to its place here.
-              The other names rename the other columns, in order. A name with no column becomes
-              one. Nothing is deleted, so no cards are lost.
+              Previous Actions moves to the place this list names it, or stays where it is. The
+              other names rename the other columns, in order. A name with no column becomes one.
+              Nothing is deleted, so no cards are lost.
             </p>
           </>
         )}

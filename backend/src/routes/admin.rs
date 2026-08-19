@@ -278,8 +278,9 @@ pub async fn apply_template(
         .await?
         .ok_or_else(|| AppError::NotFound("Template not found".to_string()))?;
 
-    // The same names a new board would get: the two action columns are the board's own and a
-    // template that asks for one of them is asking for a column that is already there.
+    // The same names a new board would get: the Actions column is the board's own and a template
+    // that asks for it is asking for a column that is already there. "Previous Actions" goes
+    // through, because a template that names it is placing the column the board already has.
     let names: Vec<String> = template
         .columns
         .into_iter()

@@ -9,10 +9,9 @@ use crate::db;
 use crate::db::CopyOutcome;
 use crate::error::AppError;
 use crate::models::{
-    normalize_labels, read_password, ActionSourceBoard, BoardAccessView, CreateBoardRequest,
-    CreateBoardResponse, ImportResult, LabelCount, MyBoardSummary, PasswordResponse, Template,
-    UnlockResponse, RESERVED_COLUMN_NAMES, ROLE_ACTIONS, ROLE_PREVIOUS_ACTIONS, ROLE_ROCKS,
-    TEMPLATE_LEVEL10,
+    normalize_labels, plan_new_board_columns, read_password, read_title, ActionSourceBoard,
+    BoardAccessView, CreateBoardRequest, CreateBoardResponse, ImportResult, LabelCount,
+    MyBoardSummary, PasswordResponse, Template, UnlockResponse, TEMPLATE_LEVEL10,
 };
 use crate::password;
 use crate::state::AppState;
@@ -41,9 +40,7 @@ pub async fn create_board(
     jar: CookieJar,
     Json(req): Json<CreateBoardRequest>,
 ) -> Result<(CookieJar, Json<CreateBoardResponse>), AppError> {
-    if req.title.trim().is_empty() {
-        return Err(AppError::BadRequest("Title is required".to_string()));
-    }
+    let title = read_title(&req.title).map_err(AppError::BadRequest)?;
     if req.columns.is_empty() {
         return Err(AppError::BadRequest(
             "At least one column is required".to_string(),
@@ -81,36 +78,19 @@ pub async fn create_board(
     // The template says how the board opens. A custom board opens blurred, as a retro does.
     let is_blurred = template.as_ref().map(|t| t.default_blurred).unwrap_or(true);
 
-    // Every board starts with Previous Actions and ends with Actions. A column that the caller
-    // asks for with one of those names would only repeat them.
-    let mut columns: Vec<(String, String, Option<&str>)> = vec![(
-        nanoid!(8),
-        "Previous Actions".to_string(),
-        Some(ROLE_PREVIOUS_ACTIONS),
-    )];
-    // On a Level 10 board the Rocks column takes a role, which is what lets a card in it carry a
-    // rock status. Only the first such column gets it: one column of each role to a board.
-    let mut rocks_taken = false;
-    columns.extend(
-        req.columns
+    // Every board has Previous Actions and Actions. The caller places Previous Actions by
+    // naming it; Actions goes last, always, and its names stay reserved. The plan itself is
+    // pure and lives in `models::plan_new_board_columns`.
+    let columns: Vec<(String, String, Option<&str>)> =
+        plan_new_board_columns(&req.columns, is_level10)
             .into_iter()
-            .filter(|name| !RESERVED_COLUMN_NAMES.contains(&name.trim().to_lowercase().as_str()))
-            .map(|name| {
-                let role = if is_level10 && !rocks_taken && name.trim().to_lowercase() == "rocks" {
-                    rocks_taken = true;
-                    Some(ROLE_ROCKS)
-                } else {
-                    None
-                };
-                (nanoid!(8), name, role)
-            }),
-    );
-    columns.push((nanoid!(8), "Actions".to_string(), Some(ROLE_ACTIONS)));
+            .map(|(name, role)| (nanoid!(8), name, role))
+            .collect();
 
     let board = db::create_board(
         &state.db,
         &board_id,
-        &req.title,
+        &title,
         &facilitator_token,
         &facilitator_id,
         &columns,
@@ -317,6 +297,36 @@ pub async fn set_password(
         has_password: hash.is_some(),
         access_token,
     }))
+}
+
+// --- The title of a board ---
+
+#[derive(Debug, Deserialize)]
+pub struct SetTitleRequest {
+    pub title: String,
+    #[serde(flatten)]
+    pub auth: BoardAuth,
+}
+
+/// Renames a board. Renaming is editing, so the editors may do it as well as the facilitator —
+/// the same rule the labels follow, not the facilitator-only rule of the password.
+pub async fn set_title(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path(board_id): Path<String>,
+    Json(req): Json<SetTitleRequest>,
+) -> Result<Json<String>, AppError> {
+    authorize(&state, &jar, &board_id, &req.auth).await?;
+
+    let title = read_title(&req.title).map_err(AppError::BadRequest)?;
+    if !db::set_board_title(&state.db, &board_id, &title).await? {
+        return Err(AppError::NotFound("Board not found".to_string()));
+    }
+
+    // The board carries a new name, so the open clients have to hear it.
+    crate::routes::ws::broadcast_board_state(&state, &board_id).await;
+
+    Ok(Json(title))
 }
 
 // --- Actions carry-over ---

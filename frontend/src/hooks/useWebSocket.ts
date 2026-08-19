@@ -28,7 +28,13 @@ export function useWebSocket(
   accessToken?: string | null,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
-  const { setBoard, setAuth, setConnected, setPasswordRequired } = useBoardStore();
+  // Selectors, not the whole store: this hook writes state and reads none, so the page that
+  // holds the socket must not re-render — and re-render every card — each time the connection
+  // flag or the board changes. Zustand setters are stable references, so these never change.
+  const setBoard = useBoardStore((s) => s.setBoard);
+  const setAuth = useBoardStore((s) => s.setAuth);
+  const setConnected = useBoardStore((s) => s.setConnected);
+  const setPasswordRequired = useBoardStore((s) => s.setPasswordRequired);
 
   const send = useCallback((msg: ClientMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {

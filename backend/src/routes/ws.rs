@@ -406,6 +406,12 @@ async fn handle_message(
         }
 
         ClientMessage::RemoveTicket { ticket_id } => {
+            // The card must sit on this board: `is_privileged` is standing on this board and
+            // says nothing about any other, so the id is scoped before the privilege counts.
+            match db::ticket_belongs_to_board(&state.db, &ticket_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
             // Check authorization: author, facilitator, or editor
             match db::get_ticket_author(&state.db, &ticket_id).await {
                 Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
@@ -426,9 +432,14 @@ async fn handle_message(
             content,
             gif,
         } => {
-            // Only author can edit
+            // The card must sit on this board, for the same reason RemoveTicket asks.
+            match db::ticket_belongs_to_board(&state.db, &ticket_id, board_id).await {
+                Ok(true) => {}
+                _ => return false,
+            }
+            // Author, facilitator, or editor
             match db::get_ticket_author(&state.db, &ticket_id).await {
-                Ok(Some(author_id)) if author_id == participant_id => {}
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
                 _ => return false,
             }
 
@@ -522,9 +533,9 @@ async fn handle_message(
             content,
             gif,
         } => {
-            // Only the author can edit, and only on this board
+            // Author, facilitator, or editor, and only on this board
             match db::get_comment_author_on_board(&state.db, &comment_id, board_id).await {
-                Ok(Some(author_id)) if author_id == participant_id => {}
+                Ok(Some(author_id)) if author_id == participant_id || is_privileged => {}
                 _ => return false,
             }
 
