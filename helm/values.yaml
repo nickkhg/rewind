@@ -92,6 +92,34 @@ secrets:
     # sign-in and the browser only ever holds an encrypted cookie this server wrote.
     clientSecret: ""
 
+# Grouping with AI. A facilitator or an editor presses "Group with AI" on a column, a model on
+# Microsoft Foundry reads the cards, and the board suggests which ones make the same point. The
+# facilitator accepts, rejects or trims each suggestion before anything merges.
+#
+# Leave endpoint and deployment empty and the control does not show. Set both or neither: half a
+# configuration stops the server. The text of every card in the column goes to the model when the
+# button is pressed, so choose a deployment your organisation is content to send retro notes to.
+ai:
+  # The endpoint of the Foundry resource, for example https://my-team.services.ai.azure.com
+  endpoint: ""
+  # The name of the model deployment on that resource, for example claude-opus-5-5 or gpt-5-mini.
+  deployment: ""
+  # "anthropic" for a Claude deployment, "openai" for any other. Left empty, a deployment whose
+  # name starts with "claude" is read as Claude, and every other one as OpenAI chat completions.
+  api: ""
+  # The server signs in to Foundry with Azure Workload Identity. Give the client ID of a
+  # user-assigned managed identity that has a data-plane role on the Foundry resource (Azure AI
+  # User, or Cognitive Services User), and a federated credential on that identity for
+  #   system:serviceaccount:<namespace>:<release fullname>
+  # The chart then makes that service account and marks the pod for the workload identity webhook,
+  # which mounts the token the server trades for one from Entra. The cluster needs the OIDC issuer
+  # and workload identity turned on.
+  #
+  # Left empty, the server asks the instance metadata service of the node, which works for an
+  # identity assigned to the node pool.
+  workloadIdentity:
+    clientId: ""
+
 env:
   port: "3001"
   rustLog: "info"

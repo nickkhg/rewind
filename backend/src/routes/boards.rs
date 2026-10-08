@@ -2,7 +2,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use time::Duration;
 
 use crate::db;
@@ -327,6 +327,104 @@ pub async fn set_title(
     crate::routes::ws::broadcast_board_state(&state, &board_id).await;
 
     Ok(Json(title))
+}
+
+// --- Grouping with AI ---
+
+#[derive(Debug, Serialize)]
+pub struct GroupSuggestions {
+    /// Each group lists the ids of the cards that make one point, oldest first. A card is in at
+    /// most one group, and every group has two cards or more.
+    pub groups: Vec<Vec<String>>,
+}
+
+/// Asks the Foundry deployment which cards of one column make the same point. The answer goes to
+/// the caller alone and changes nothing: the facilitator reviews it, and the groups they accept
+/// come back as one `MergeTicketGroups` on the socket.
+///
+/// The facilitator and the editors only, the people who may merge. The board must be open, by
+/// the rule a merge already follows: the facilitator would review cards the room cannot read yet,
+/// and the text of every card goes to the model.
+pub async fn suggest_groups(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    Path((board_id, column_id)): Path<(String, String)>,
+    Json(auth): Json<BoardAuth>,
+) -> Result<Json<GroupSuggestions>, AppError> {
+    let Some(ai) = state.ai.clone() else {
+        return Err(AppError::NotFound(
+            "This server has no AI grouping set up".to_string(),
+        ));
+    };
+    authorize(&state, &jar, &board_id, &auth).await?;
+
+    let board = db::get_board(&state.db, &board_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Board not found".to_string()))?;
+    if board.is_blurred {
+        return Err(AppError::BadRequest(
+            "Reveal the cards before grouping them".to_string(),
+        ));
+    }
+    let column = board
+        .columns
+        .into_iter()
+        .find(|c| c.id == column_id)
+        .ok_or_else(|| AppError::NotFound("Column not found".to_string()))?;
+
+    // A card with nothing but a GIF still says something, and its title is what says it.
+    let mut tickets = column.tickets;
+    tickets.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+    let texts: Vec<String> = tickets
+        .iter()
+        .map(|t| match (&t.gif, t.content.trim().is_empty()) {
+            (Some(gif), true) => format!("(a GIF: {})", gif.title),
+            _ => t.content.clone(),
+        })
+        .collect();
+
+    if texts.len() > crate::ai::MAX_CARDS {
+        return Err(AppError::BadRequest(format!(
+            "This column holds more than {} cards, too many to group in one go",
+            crate::ai::MAX_CARDS
+        )));
+    }
+    if texts.iter().map(|t| t.chars().count()).sum::<usize>() > crate::ai::MAX_TOTAL_CHARS {
+        return Err(AppError::BadRequest(
+            "This column holds too much text to group in one go".to_string(),
+        ));
+    }
+
+    // One request per board at a time. The guard frees the board however the request ends.
+    let Some(_running) = state.start_grouping(&board_id) else {
+        return Err(AppError::Conflict(
+            "A grouping is already running on this board".to_string(),
+        ));
+    };
+
+    let groups = ai.suggest_groups(&column.name, &texts).await.map_err(|e| {
+        use crate::ai::AiError;
+        match e {
+            AiError::Declined => {
+                AppError::BadGateway("The model would not group this column".to_string())
+            }
+            AiError::Credential(detail) => {
+                tracing::warn!(board_id, "AI grouping could not sign in to Foundry: {detail}");
+                AppError::BadGateway("The server could not sign in to the model".to_string())
+            }
+            AiError::Upstream(detail) => {
+                tracing::warn!(board_id, "AI grouping failed: {detail}");
+                AppError::BadGateway("The model did not answer. Try again".to_string())
+            }
+        }
+    })?;
+
+    Ok(Json(GroupSuggestions {
+        groups: groups
+            .into_iter()
+            .map(|group| group.into_iter().map(|i| tickets[i].id.clone()).collect())
+            .collect(),
+    }))
 }
 
 // --- Actions carry-over ---

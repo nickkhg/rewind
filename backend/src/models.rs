@@ -616,6 +616,9 @@ pub struct ClientConfig {
     /// Whether this deployment asks for a work account, and who the reader signed in as. Both are
     /// off and absent on a deployment that named no Entra app registration.
     pub auth: crate::auth::AuthConfig,
+    /// Whether a Foundry deployment can suggest which cards to merge. The facilitator and the
+    /// editors see the control only when it is true.
+    pub ai_grouping: bool,
 }
 
 #[cfg(test)]

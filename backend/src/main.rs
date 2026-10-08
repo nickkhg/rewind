@@ -1,3 +1,4 @@
+mod ai;
 mod auth;
 mod db;
 mod error;
@@ -65,7 +66,14 @@ async fn main() {
         tracing::info!("no Entra app registration set — the server asks nobody to sign in");
     }
 
-    let state = AppState::new(db, admin_token_hash, giphy_api_key, entra);
+    // The Foundry deployment that suggests merges, or nothing. Nothing leaves the control out of
+    // every column, which is how a board has always worked.
+    let ai = ai::AiGrouping::from_env();
+    if ai.is_none() {
+        tracing::info!("no Foundry deployment set — AI grouping is off");
+    }
+
+    let state = AppState::new(db, admin_token_hash, giphy_api_key, entra, ai);
     let static_dir = std::env::var("STATIC_DIR").unwrap_or_default();
 
     let mut app = Router::new()
@@ -96,6 +104,10 @@ async fn main() {
             post(routes::boards::import_actions),
         )
         .route("/api/boards/{id}/title", put(routes::boards::set_title))
+        .route(
+            "/api/boards/{id}/columns/{column_id}/group-suggestions",
+            post(routes::boards::suggest_groups),
+        )
         .route("/api/boards/{id}/labels", put(routes::boards::set_labels))
         .route("/api/labels", get(routes::boards::list_labels))
         .route("/api/my-boards", get(routes::boards::my_boards))

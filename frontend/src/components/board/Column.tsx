@@ -3,7 +3,15 @@ import { useBoardStore } from "../../store/boardStore";
 import { sortTickets } from "../../utils/sort";
 import { DraggableTicket } from "./DraggableTicket";
 import { AddTicketForm } from "./AddTicketForm";
-import type { Column as ColumnType, ClientMessage } from "../../lib/types";
+import {
+  arrangeColumn,
+  GroupReviewBar,
+  GroupWithAiButton,
+  liveGroups,
+  SuggestedGroup,
+} from "./GroupWithAi";
+import { useAiGrouping } from "../../hooks/useAiGrouping";
+import type { Column as ColumnType, ClientMessage, Ticket } from "../../lib/types";
 
 interface ColumnProps {
   column: ColumnType;
@@ -21,6 +29,17 @@ export function Column({ column, color, send }: ColumnProps) {
   const isArchive = column.role === "previous_actions";
   const effectiveSortMode = hideVotes ? "newest" : sortMode;
   const sorted = sortTickets(column.tickets, isArchive ? "newest" : effectiveSortMode);
+
+  // Grouping with AI belongs to whoever may merge: the facilitator and the editors.
+  const aiGrouping = useAiGrouping();
+  const isFacilitator = useBoardStore((s) => s.isFacilitator);
+  const isEditor = useBoardStore(
+    (s) => !!participantId && !!s.board?.editors.some((e) => e.participant_id === participantId),
+  );
+  const review = useBoardStore((s) => s.groupReviews[column.id]);
+  const canGroup = aiGrouping && (isFacilitator || isEditor);
+  const groups = review?.status === "ready" ? liveGroups(review.groups, sorted) : [];
+  const items = arrangeColumn(sorted, groups);
 
   // Count how many votes the current participant has in this column
   const myVotesInColumn = participantId
@@ -48,6 +67,20 @@ export function Column({ column, color, send }: ColumnProps) {
     columnOf(over?.data.current) === column.id &&
     columnOf(active.data.current) !== column.id;
 
+  const renderTicket = (ticket: Ticket) => (
+    <DraggableTicket
+      key={ticket.id}
+      ticket={ticket}
+      color={color}
+      columnId={column.id}
+      columnName={column.name}
+      columnRole={column.role}
+      voteLimitReached={voteLimitReached}
+      isBlurred={isBlurred && !isArchive}
+      send={send}
+    />
+  );
+
   return (
     <div ref={setNodeRef} className="flex-1 min-w-[280px] max-w-[400px] flex flex-col min-h-0">
       <div className="flex items-center gap-2 mb-3">
@@ -57,12 +90,27 @@ export function Column({ column, color, send }: ColumnProps) {
         />
         <h2 className="font-display font-semibold text-base">{column.name}</h2>
         <span className="text-xs text-muted">{column.tickets.length}</span>
-        {voteLimit !== null && !hideVotes && !isArchive && (
-          <span className="text-xs text-muted ml-auto">
-            {myVotesInColumn}/{voteLimit} votes
-          </span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {voteLimit !== null && !hideVotes && !isArchive && (
+            <span className="text-xs text-muted">
+              {myVotesInColumn}/{voteLimit} votes
+            </span>
+          )}
+          {canGroup && !review && column.tickets.length >= 2 && (
+            <GroupWithAiButton columnId={column.id} isBlurred={isBlurred} />
+          )}
+        </div>
       </div>
+
+      {canGroup && (
+        <GroupReviewBar
+          columnId={column.id}
+          cardCount={column.tickets.length}
+          groups={groups}
+          isBlurred={isBlurred}
+          send={send}
+        />
+      )}
 
       <AddTicketForm columnId={column.id} send={send} />
 
@@ -80,19 +128,18 @@ export function Column({ column, color, send }: ColumnProps) {
             Board Settings.
           </p>
         )}
-        {sorted.map((ticket) => (
-          <DraggableTicket
-            key={ticket.id}
-            ticket={ticket}
-            color={color}
-            columnId={column.id}
-            columnName={column.name}
-            columnRole={column.role}
-            voteLimitReached={voteLimitReached}
-            isBlurred={isBlurred && !isArchive}
-            send={send}
-          />
-        ))}
+        {items.map((item) =>
+          "ticket" in item ? (
+            renderTicket(item.ticket)
+          ) : (
+            <SuggestedGroup
+              key={`group-${item.group.group.key}`}
+              columnId={column.id}
+              live={item.group}
+              renderTicket={renderTicket}
+            />
+          ),
+        )}
       </div>
     </div>
   );

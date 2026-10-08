@@ -155,6 +155,37 @@
   }
 }
 
+/* A suggested group draws itself around cards that already sit together: the outline settles in,
+   the cards do not move again. */
+@keyframes group-gather {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-group-gather {
+  animation: group-gather 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The model is reading the column. A slow sweep, because it may take some seconds. */
+@keyframes group-read {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.animate-group-read {
+  animation: group-read 1.6s ease-in-out infinite;
+}
+
 /* Facilitator menu animations */
 @keyframes slide-in-right {
   from {
