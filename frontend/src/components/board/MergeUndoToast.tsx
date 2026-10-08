@@ -24,7 +24,7 @@ export function MergeUndoToast({ send }: MergeUndoToastProps) {
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-card-enter">
       <div className="flex items-center gap-3 bg-surface border border-border shadow-lg rounded-lg px-4 py-2.5">
-        <span className="text-sm">Tickets merged</span>
+        <span className="text-sm">{pendingUndo}</span>
         <button
           onClick={() => {
             send({ type: "UndoMerge" });

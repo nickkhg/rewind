@@ -28,6 +28,7 @@ pub async fn get_config(
             enabled: state.entra.is_some(),
             user: identity.map(|Extension(identity)| identity),
         },
+        ai_grouping: state.ai.is_some(),
     })
 }
 

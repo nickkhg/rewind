@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use nanoid::nanoid;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use std::collections::HashSet;
 
 use crate::models::{
@@ -1017,20 +1017,31 @@ pub async fn merge_tickets(
     target_id: &str,
 ) -> Result<Option<MergeSnapshot>, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    let snapshot = merge_pair(&mut tx, source_id, target_id).await?;
+    tx.commit().await?;
+    Ok(snapshot)
+}
 
+/// Folds the source card into the target card, inside the transaction of the caller, so that a
+/// grouping of many cards lands whole or not at all.
+async fn merge_pair(
+    conn: &mut PgConnection,
+    source_id: &str,
+    target_id: &str,
+) -> Result<Option<MergeSnapshot>, sqlx::Error> {
     // Fetch both tickets
     let source = sqlx::query_as::<_, TicketRow>(
         &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE id = $1"),
     )
     .bind(source_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     let target = sqlx::query_as::<_, TicketRow>(
         &format!("SELECT {TICKET_COLUMNS} FROM tickets WHERE id = $1"),
     )
     .bind(target_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
 
     let (mut source, mut target) = match (source, target) {
@@ -1044,7 +1055,7 @@ pub async fn merge_tickets(
     let source_votes: Vec<VoteRow> =
         sqlx::query_as::<_, VoteRow>("SELECT ticket_id, participant_id FROM votes WHERE ticket_id = $1")
             .bind(source_id)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut *conn)
             .await?;
     let source_vote_ids: Vec<String> = source_votes.iter().map(|v| v.participant_id.clone()).collect();
 
@@ -1053,7 +1064,7 @@ pub async fn merge_tickets(
         "SELECT id FROM ticket_comments WHERE ticket_id = $1",
     )
     .bind(source_id)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut *conn)
     .await?;
     let source_comment_ids: Vec<String> = source_comments.into_iter().map(|r| r.id).collect();
 
@@ -1078,7 +1089,7 @@ pub async fn merge_tickets(
     .bind(gh)
     .bind(gtitle)
     .bind(target_id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     // Copy source votes to target (union — skip duplicates)
@@ -1086,7 +1097,7 @@ pub async fn merge_tickets(
         sqlx::query("INSERT INTO votes (ticket_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
             .bind(target_id)
             .bind(voter_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
     }
 
@@ -1095,17 +1106,15 @@ pub async fn merge_tickets(
         sqlx::query("UPDATE ticket_comments SET ticket_id = $1 WHERE ticket_id = $2")
             .bind(target_id)
             .bind(source_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
     }
 
     // Delete source ticket (cascade deletes its votes)
     sqlx::query("DELETE FROM tickets WHERE id = $1")
         .bind(source_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
-
-    tx.commit().await?;
 
     Ok(Some(MergeSnapshot {
         source_id: source.id,
@@ -1128,9 +1137,18 @@ pub async fn merge_tickets(
     }))
 }
 
-pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), sqlx::Error> {
+/// Takes back the merges of one drag or one grouping, the last first: a card that took two others
+/// has to give back the second before the first, or its text would not be the text it had.
+pub async fn undo_merges(pool: &PgPool, snapshots: &[MergeSnapshot]) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
+    for snapshot in snapshots.iter().rev() {
+        undo_pair(&mut tx, snapshot).await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
 
+async fn undo_pair(conn: &mut PgConnection, snapshot: &MergeSnapshot) -> Result<(), sqlx::Error> {
     // Restore target's original content, and with it the GIF the target had before the merge
     let (gid, gurl, gstill, gw, gh, gtitle) = gif_binds(snapshot.target_original_gif.as_ref());
     sqlx::query(
@@ -1145,7 +1163,7 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .bind(gh)
     .bind(gtitle)
     .bind(&snapshot.target_id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     // Re-create source ticket, GIF, rock status, done mark and all
@@ -1172,7 +1190,7 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
     .bind(gtitle)
     .bind(&snapshot.source_rock_status)
     .bind(snapshot.source_done_at)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await?;
 
     // Re-create source votes
@@ -1180,7 +1198,7 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
         sqlx::query("INSERT INTO votes (ticket_id, participant_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
             .bind(&snapshot.source_id)
             .bind(voter_id)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
     }
 
@@ -1189,12 +1207,51 @@ pub async fn undo_merge(pool: &PgPool, snapshot: &MergeSnapshot) -> Result<(), s
         sqlx::query("UPDATE ticket_comments SET ticket_id = $1 WHERE id = ANY($2)")
             .bind(&snapshot.source_id)
             .bind(&snapshot.source_comment_ids)
-            .execute(&mut *tx)
+            .execute(&mut *conn)
             .await?;
     }
 
-    tx.commit().await?;
     Ok(())
+}
+
+
+/// Merges each group of cards into its oldest card, all in one transaction. A group is read again
+/// here, not trusted: a card that left the board since the suggestion is skipped, and a group whose
+/// cards no longer share one column of this board is left alone, because a merge joins two cards
+/// of one column and nothing else. The snapshots come back in the order the merges ran.
+pub async fn merge_ticket_groups(
+    pool: &PgPool,
+    board_id: &str,
+    groups: &[Vec<String>],
+) -> Result<Vec<MergeSnapshot>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let mut snapshots = Vec::new();
+
+    for group in groups {
+        let members = sqlx::query_as::<_, GroupMemberRow>(
+            "SELECT t.id, t.column_id FROM tickets t JOIN columns c ON c.id = t.column_id \
+             WHERE t.id = ANY($1) AND c.board_id = $2 ORDER BY t.created_at, t.id",
+        )
+        .bind(group)
+        .bind(board_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        if members.len() < 2 || members.iter().any(|m| m.column_id != members[0].column_id) {
+            continue;
+        }
+
+        // The oldest card takes the others, so the merged text reads in the order it was written.
+        let target_id = &members[0].id;
+        for source in &members[1..] {
+            if let Some(snapshot) = merge_pair(&mut tx, &source.id, target_id).await? {
+                snapshots.push(snapshot);
+            }
+        }
+    }
+
+    tx.commit().await?;
+    Ok(snapshots)
 }
 
 // --- Split ---
@@ -2384,6 +2441,12 @@ struct CommentRow {
     gif_width: Option<i32>,
     gif_height: Option<i32>,
     gif_title: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct GroupMemberRow {
+    id: String,
+    column_id: String,
 }
 
 #[derive(sqlx::FromRow)]

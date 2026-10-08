@@ -25,7 +25,7 @@ cargo check --workspace
 
 Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri/` (Tauri v2 desktop wrapper). Cargo workspace at root, pnpm workspace for frontend.
 
-**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the board title, the carry-over, and the board password. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
+**Data flow:** Frontend ↔ WebSocket ↔ Axum backend (PostgreSQL-backed). REST is used for board creation (`POST /api/boards`), templates (`GET /api/templates`), labels, the board title, the carry-over, the board password, and the AI grouping suggestion. All real-time sync happens via WebSocket at `/ws/boards/{id}`, broadcasting full board state on every mutation. Boards are persisted in PostgreSQL. A REST route that changes a board calls `routes::ws::broadcast_board_state` so that the open clients see the change.
 
 **Backend state:** `AppState` holds a `PgPool` for database access and a parallel map of `tokio::sync::broadcast` channels (capacity 64) for WebSocket fan-out plus in-memory participant tracking.
 
@@ -37,7 +37,7 @@ Monorepo with three packages: `backend/` (Rust), `frontend/` (React), `src-tauri
 
 Messages are serde-tagged enums: `#[serde(tag = "type", content = "payload")]`. TypeScript mirrors this as discriminated unions in `lib/types.ts`.
 
-Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`, `SetTicketDone`, `SetRockStatus`, `RateMeeting`, `AddScorecardMetric`, `UpdateScorecardMetric`, `RemoveScorecardMetric`
+Client → Server: `Join`, `AddTicket`, `RemoveTicket`, `EditTicket`, `ToggleVote`, `ToggleBlur`, `AddComment`, `EditComment`, `RemoveComment`, `SetTicketDone`, `SetRockStatus`, `RateMeeting`, `AddScorecardMetric`, `UpdateScorecardMetric`, `RemoveScorecardMetric`, `MergeTicketGroups`
 Server → Client: `BoardState` (after every mutation), `Authenticated` (after Join), `PasswordRequired` (the gate of a locked board; the socket closes after it), `Error`
 
 `Join` carries an optional `access_token`, the key a reader got for the password of a locked board.
@@ -189,6 +189,44 @@ client secret stays in the pod; what the browser holds is one cookie this server
   origin, so the cookie a sign-in ends with has nowhere to live. `GET /api/health` says whether a
   server asks for an account, and `Setup` and `App` read it to say so plainly and point at the
   browser, rather than letting each request fail on its own.
+
+## Grouping with AI
+
+A retro spends its first minutes merging cards that say the same thing, so a Foundry model can
+suggest the merges. `ai.rs` holds the client; nothing in it touches a board.
+
+- **Off unless named.** `AZURE_AI_ENDPOINT` and `AZURE_AI_DEPLOYMENT`, both or neither. If only one
+  is set, the server stops, which is the Entra rule. `AZURE_AI_API` chooses the request shape. A
+  Claude deployment speaks the Messages API under `/anthropic/v1/messages`, with structured
+  outputs. Every other deployment speaks chat completions under `/openai/v1`, with no
+  `response_format`, `max_tokens` or `temperature`, because some model in the catalogue refuses
+  each of them. Left out, a deployment name that starts with "claude" picks the first.
+- **A managed identity, not a key.** The credential is chosen in this order: `AZURE_AI_API_KEY`
+  (a laptop), Workload Identity (the federated token file, which is read again at every trade
+  because the kubelet rotates it), the App Service endpoint, IMDS. The token is for
+  `https://cognitiveservices.azure.com` and is cached until five minutes before it runs out.
+  The chart makes the annotated service account when `ai.workloadIdentity.clientId` is set.
+- **The suggestion is REST, and it goes to the caller alone.**
+  `POST /api/boards/{id}/columns/{column_id}/group-suggestions` takes the `authorize` check (the
+  facilitator or an editor) and refuses a blurred board, by the same rule a merge follows. The
+  cards go out numbered from 1, not by id: a number is harder for the model to garble.
+  `ai::clean_groups` maps the numbers back. It drops numbers out of range, keeps a card only in
+  the first group that names it, and drops groups of one. The answer is ticket ids, oldest first.
+  One request per board at a time: `AppState::start_grouping` returns a guard, and dropping the
+  guard frees the board. That also covers a browser that gives up, because axum then drops the
+  handler before any code after the await runs.
+- **The review lives in the tab.** `boardStore.groupReviews` holds it per column. `liveGroups`
+  holds each group to the cards still on the board, so a card someone deleted leaves its group.
+  `arrangeColumn` pulls the cards of a group together where the first of them sits. Accept,
+  reject and leave out only change the store.
+- **The merge is a socket message.** `MergeTicketGroups { groups }` takes the facilitator or an
+  editor, and an open board. `db::merge_ticket_groups` reads every group again, in one
+  transaction. It skips a card that left the board, and it leaves alone a group whose cards no
+  longer share one column of this board. The oldest card takes the others, in the order they
+  were written, through `merge_pair`, which is the same code a drag merge runs.
+- **One undo for the whole grouping.** `last_merge` holds a `Vec<MergeSnapshot>` per board: one
+  for a drag, one per folded card for a grouping. `db::undo_merges` takes them back last first,
+  in one transaction. A card that took two others has to give back the second before the first.
 
 ## Restarting the Service
 

@@ -6,6 +6,7 @@ import type {
   ClientConfig,
   CreateBoardRequest,
   CreateBoardResponse,
+  GroupSuggestions,
   Health,
   ImportResult,
   LabelCount,
@@ -190,6 +191,24 @@ export async function updateBoardTitle(boardId: string, title: string): Promise<
     body: JSON.stringify({ title, ...boardAuth(boardId) }),
   });
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * Asks the model which cards of one column make the same point. The facilitator and the editors
+ * alone. Nothing changes on the board: the groups come back to this tab for review.
+ */
+export async function suggestGroups(boardId: string, columnId: string): Promise<GroupSuggestions> {
+  const res = await fetch(
+    `${getServerUrl()}/api/boards/${boardId}/columns/${columnId}/group-suggestions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(boardAuth(boardId)),
+    },
+  );
+  if (!res.ok) throw new Error((await res.text()) || `The server answered ${res.status}`);
   return res.json();
 }
 

@@ -133,6 +133,13 @@ export interface ClientConfig {
   version: string;
   /** Whether this server asks for a work account, and who this reader signed in as. */
   auth: AuthConfig;
+  /** Whether a Foundry deployment can suggest which cards to merge. */
+  ai_grouping: boolean;
+}
+
+/** The answer to "which cards of this column make the same point". Ids, oldest card first. */
+export interface GroupSuggestions {
+  groups: string[][];
 }
 
 export interface AuthConfig {
@@ -254,6 +261,7 @@ export type ClientMessage =
   | { type: "ToggleBlur" }
   | { type: "ToggleHideVotes" }
   | { type: "MergeTickets"; payload: { source_ticket_id: string; target_ticket_id: string } }
+  | { type: "MergeTicketGroups"; payload: { groups: string[][] } }
   | { type: "UndoMerge" }
   | { type: "SplitTicket"; payload: { ticket_id: string; segment_index: number } }
   | { type: "SetVoteLimit"; payload: { limit: number | null } }
@@ -379,6 +387,13 @@ export const COLUMN_ROLE_COLORS: Record<ColumnRole, string> = {
  * have a fixed color of their own, so nothing is lost by the swap, and a done card reads as
  * done from the far end of the room.
  */
+/**
+ * The inks of the groups an AI review suggests. Deeper than the pastel columns and away from the
+ * accent, so a group reads as a mark laid over the board rather than as another column. Each
+ * group carries a letter as well, so the ink is never the only way to tell two groups apart.
+ */
+export const GROUP_INKS = ["#4f6bd8", "#1f8a83", "#9b4fa6", "#b7791f", "#5c7f2a"] as const;
+
 export const DONE_EDGE_COLOR = "#5f9e6e";
 
 /** The two columns whose cards can be marked done. The backend applies the same rule. */

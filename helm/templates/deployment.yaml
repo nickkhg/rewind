@@ -15,7 +15,14 @@ spec:
         checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
       labels:
         {{- include "rewind.selectorLabels" . | nindent 8 }}
+        {{- if .Values.ai.workloadIdentity.clientId }}
+        # The webhook mounts the federated token on a pod that carries this label, and on no other.
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
+      {{- if .Values.ai.workloadIdentity.clientId }}
+      serviceAccountName: {{ include "rewind.fullname" . }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -118,6 +125,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "rewind.fullname" . }}
                   key: entra-client-secret
+            # Grouping with AI. Endpoint and deployment both empty leave the control out.
+            - name: AZURE_AI_ENDPOINT
+              value: {{ .Values.ai.endpoint | quote }}
+            - name: AZURE_AI_DEPLOYMENT
+              value: {{ .Values.ai.deployment | quote }}
+            - name: AZURE_AI_API
+              value: {{ .Values.ai.api | quote }}
             - name: PUBLIC_URL
               value: {{ .Values.env.publicUrl | quote }}
             - name: PORT

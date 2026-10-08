@@ -6,6 +6,10 @@ pub enum AppError {
     BadRequest(String),
     Unauthorized(String),
     Forbidden(String),
+    /// The request clashes with one already running.
+    Conflict(String),
+    /// A service this one depends on did not answer as it should.
+    BadGateway(String),
     Internal(String),
 }
 
@@ -16,6 +20,8 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
             AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg),
+            AppError::BadGateway(msg) => (StatusCode::BAD_GATEWAY, msg),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
         };
         (status, message).into_response()

@@ -58,6 +58,11 @@ pub enum ClientMessage {
         source_ticket_id: String,
         target_ticket_id: String,
     },
+    /// Merges each group into one card, as a drag would merge each pair: the cards a facilitator
+    /// accepted from a grouping suggestion. One undo takes the whole of it back.
+    MergeTicketGroups {
+        groups: Vec<Vec<String>>,
+    },
     UndoMerge,
     SplitTicket {
         ticket_id: String,

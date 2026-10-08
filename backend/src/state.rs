@@ -2,7 +2,7 @@ use crate::models::{Gif, Participant};
 use crate::protocol::ServerMessage;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 
@@ -40,12 +40,20 @@ pub struct AppState {
     pub participants: Arc<RwLock<HashMap<String, Vec<Participant>>>>,
     pub channels: Arc<RwLock<HashMap<String, BoardChannel>>>,
     pub admin_token_hash: Option<String>,
-    pub last_merge: Arc<RwLock<HashMap<String, MergeSnapshot>>>,
+    /// The last merge of each board, for the undo. A drag merges two cards and keeps one snapshot;
+    /// a grouping keeps one per card it folded in, in the order they ran, and the undo takes them
+    /// all back in the reverse order.
+    pub last_merge: Arc<RwLock<HashMap<String, Vec<MergeSnapshot>>>>,
     /// The GIPHY key from the Kubernetes secret. None leaves the GIF controls out of the frontend.
     pub giphy_api_key: Option<String>,
     /// The Entra app registration this deployment signs people in with. None leaves the server as
     /// open as it was — no door, and nothing in the frontend that mentions one.
     pub entra: Option<Arc<crate::auth::EntraAuth>>,
+    /// The Foundry deployment that suggests which cards to merge. None leaves the control out.
+    pub ai: Option<Arc<crate::ai::AiGrouping>>,
+    /// The boards with a grouping request out. One at a time per board: a second press while the
+    /// first is out would pay for the same answer twice.
+    pub ai_in_flight: Arc<std::sync::Mutex<HashSet<String>>>,
 }
 
 impl AppState {
@@ -54,6 +62,7 @@ impl AppState {
         admin_token_hash: Option<String>,
         giphy_api_key: Option<String>,
         entra: Option<Arc<crate::auth::EntraAuth>>,
+        ai: Option<Arc<crate::ai::AiGrouping>>,
     ) -> Self {
         Self {
             db,
@@ -63,6 +72,8 @@ impl AppState {
             last_merge: Arc::new(RwLock::new(HashMap::new())),
             giphy_api_key,
             entra,
+            ai,
+            ai_in_flight: Arc::new(std::sync::Mutex::new(HashSet::new())),
         }
     }
 
@@ -83,8 +94,31 @@ impl AppState {
         tx
     }
 
+    /// Marks a grouping as running on the board. None while one is running already. The board is
+    /// free again when the guard drops, which also covers a request the browser gave up on: axum
+    /// drops the handler then, and an await after the call would never run.
+    pub fn start_grouping(&self, board_id: &str) -> Option<GroupingGuard> {
+        let mut running = self.ai_in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        running.insert(board_id.to_string()).then(|| GroupingGuard {
+            running: self.ai_in_flight.clone(),
+            board_id: board_id.to_string(),
+        })
+    }
+
     pub async fn participant_count(&self, board_id: &str) -> usize {
         let participants = self.participants.read().await;
         participants.get(board_id).map(|v| v.len()).unwrap_or(0)
+    }
+}
+
+pub struct GroupingGuard {
+    running: Arc<std::sync::Mutex<HashSet<String>>>,
+    board_id: String,
+}
+
+impl Drop for GroupingGuard {
+    fn drop(&mut self) {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        running.remove(&self.board_id);
     }
 }

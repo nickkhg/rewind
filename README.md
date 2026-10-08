@@ -107,6 +107,10 @@ cargo tauri dev
 | `ENTRA_TENANT_ID` | No | — | Directory (tenant) ID of the Entra app registration (see [Entra Sign-In](#entra-sign-in)) |
 | `ENTRA_CLIENT_ID` | No | — | Application (client) ID |
 | `ENTRA_CLIENT_SECRET` | No | — | Client secret. It stays in the pod; the browser never sees it |
+| `AZURE_AI_ENDPOINT` | No | — | Endpoint of a Microsoft Foundry resource, e.g. `https://my-team.services.ai.azure.com` (see [Grouping with AI](#grouping-with-ai)) |
+| `AZURE_AI_DEPLOYMENT` | No | — | Name of the model deployment on that resource, e.g. `claude-opus-5-5` |
+| `AZURE_AI_API` | No | from the name | `anthropic` for a Claude deployment, `openai` for any other. Omitted, a name that starts with `claude` means `anthropic` |
+| `AZURE_AI_API_KEY` | No | — | A key of the Foundry resource, for local development. In a cluster, leave it out and use a managed identity |
 | `PUBLIC_URL` | No | — | The origin browsers reach Rewind on, e.g. `https://rewind.example.com`. Only needed when a proxy rewrites the host — otherwise the redirect URI is derived from `X-Forwarded-Proto` / `X-Forwarded-Host` |
 | `VITE_API_URL` | No | — | Frontend override for backend URL (only needed if the frontend is hosted separately from the backend) |
 | `RUST_LOG` | No | `info` | Log level filter (e.g. `debug`, `rewind_backend=debug`) |
@@ -166,6 +170,51 @@ cd frontend && pnpm build
 cd ../backend && cargo build --release
 cargo tauri build  # for macOS .app bundle
 ```
+
+## Grouping with AI
+
+A retro spends its first minutes merging cards that say the same thing. With a model on
+Microsoft Foundry, the facilitator or an editor can press **Group with AI** on a column. The
+model reads the cards and suggests which ones make the same point. The cards of each suggested
+group come together in a dashed outline. The reviewer accepts or rejects each group, or takes
+single cards out with **Leave out**, then presses **Merge**. The accepted groups merge as a drag
+merge would, and **Undo** takes back the whole grouping in one step. A suggestion goes only to
+the person who asked for it, and nothing changes on the board before the merge.
+
+The control is there only when all of these are true: the server names a Foundry deployment,
+the reader is the facilitator or an editor, and the column holds two cards or more. A blurred
+board refuses the request, because merging is off while cards are hidden. When the button is
+pressed, the text of every card in that column goes to the model, so pick a deployment that
+your organisation is content to send retro notes to.
+
+Set `AZURE_AI_ENDPOINT` and `AZURE_AI_DEPLOYMENT` together, or leave both empty to turn the
+feature off. If you set only one, the server stops. Claude deployments use the Messages API
+under `/anthropic`. All other deployments use OpenAI chat completions under `/openai/v1`.
+
+**Signing in to Foundry.** The server uses a managed identity, so no key goes into the chart.
+It looks for these, in this order:
+
+1. `AZURE_AI_API_KEY`, for a laptop.
+2. Azure Workload Identity: `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID` and
+   `AZURE_TENANT_ID`. On AKS, the webhook sets these.
+3. The App Service / Container Apps identity endpoint (`IDENTITY_ENDPOINT`, `IDENTITY_HEADER`).
+4. The instance metadata service of the node. This uses the system-assigned identity, or the
+   user-assigned identity that `AZURE_CLIENT_ID` names.
+
+The identity needs a data-plane role on the Foundry resource, such as **Azure AI User** or
+**Cognitive Services User**. On AKS, fill in the chart:
+
+```yaml
+ai:
+  endpoint: "https://my-team.services.ai.azure.com"
+  deployment: "claude-opus-5-5"
+  workloadIdentity:
+    clientId: "<client ID of the user-assigned managed identity>"
+```
+
+The chart then creates a service account annotated with that client ID, and labels the pod for
+the workload identity webhook. On the managed identity, add a federated credential for
+`system:serviceaccount:<namespace>:<release fullname>` with the cluster's OIDC issuer.
 
 ## Deployment
 

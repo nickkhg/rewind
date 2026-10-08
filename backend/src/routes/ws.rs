@@ -328,6 +328,30 @@ fn clean_comment(content: &str, has_gif: bool) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+/// The most groups, and the most cards in one group, that a grouping may merge at once. A column
+/// holds far fewer; the bound keeps one message from holding the transaction open for long.
+const MAX_MERGE_GROUPS: usize = 100;
+const MAX_MERGE_GROUP_SIZE: usize = 50;
+
+/// Checks the shape of a grouping before any of it reaches the database: no card in two groups,
+/// no group of one, nothing past the bounds. Gives None for a message that breaks one of them,
+/// because a client that sends one is not the client this server wrote.
+fn clean_merge_groups(groups: Vec<Vec<String>>) -> Option<Vec<Vec<String>>> {
+    if groups.is_empty() || groups.len() > MAX_MERGE_GROUPS {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    for group in &groups {
+        if group.len() < 2 || group.len() > MAX_MERGE_GROUP_SIZE {
+            return None;
+        }
+        if !group.iter().all(|id| seen.insert(id.as_str())) {
+            return None;
+        }
+    }
+    Some(groups)
+}
+
 /// Removes the space at the two ends of one scorecard field. Gives None if it is too long.
 fn clean_scorecard_field(value: &str) -> Option<String> {
     let trimmed = value.trim();
@@ -655,12 +679,40 @@ async fn handle_message(
             match db::merge_tickets(&state.db, &source_ticket_id, &target_ticket_id).await {
                 Ok(Some(snapshot)) => {
                     let mut merges = state.last_merge.write().await;
-                    merges.insert(board_id.to_string(), snapshot);
+                    merges.insert(board_id.to_string(), vec![snapshot]);
                     true
                 }
                 Ok(None) => false,
                 Err(e) => {
                     warn!("Failed to merge tickets: {e}");
+                    false
+                }
+            }
+        }
+
+        ClientMessage::MergeTicketGroups { groups } => {
+            // A grouping folds many cards at once, so it belongs to whoever runs the board.
+            if !is_privileged {
+                return false;
+            }
+            // The rule of a single merge: a card hidden from its readers stays its own card.
+            match db::get_blur_state(&state.db, board_id).await {
+                Ok(Some(false)) => {}
+                _ => return false,
+            }
+            let Some(groups) = clean_merge_groups(groups) else {
+                return false;
+            };
+
+            match db::merge_ticket_groups(&state.db, board_id, &groups).await {
+                Ok(snapshots) if snapshots.is_empty() => false,
+                Ok(snapshots) => {
+                    let mut merges = state.last_merge.write().await;
+                    merges.insert(board_id.to_string(), snapshots);
+                    true
+                }
+                Err(e) => {
+                    warn!("Failed to merge ticket groups: {e}");
                     false
                 }
             }
@@ -672,7 +724,7 @@ async fn handle_message(
                 merges.remove(board_id)
             };
             match snapshot {
-                Some(snap) => match db::undo_merge(&state.db, &snap).await {
+                Some(snaps) => match db::undo_merges(&state.db, &snaps).await {
                     Ok(()) => true,
                     Err(e) => {
                         warn!("Failed to undo merge: {e}");

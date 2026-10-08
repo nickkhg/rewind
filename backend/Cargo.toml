@@ -1,6 +1,6 @@
 [package]
 name = "rewind-backend"
-version = "1.13.0"
+version = "1.14.0"
 edition = "2021"
 
 [dependencies]
@@ -27,3 +27,6 @@ http = "1.4.0"
 openidconnect = { version = "4", default-features = false, features = ["reqwest", "rustls-tls"] }
 url = "2"
 sha2 = "0.10"
+# The calls to Microsoft Foundry and to the managed identity endpoints (see `ai.rs`). The same
+# version and TLS as the one openidconnect already pulls in, so nothing new is built.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
